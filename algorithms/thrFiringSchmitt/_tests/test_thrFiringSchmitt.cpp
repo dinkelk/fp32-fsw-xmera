@@ -7,8 +7,7 @@
 
 TEST(ThrFiringSchmittConfigTest, RejectsInvalidParameters) {
     ThrFiringSchmittThrusterArray validArray{};
-    validArray.numThrusters = 1;
-    validArray.maxThrust.at(0) = 1.0F;
+    validArray.maxThrust.fill(1.0F);
     const ThrFiringSchmittControlParameters validParams{
         0.75F, 0.25F, 0.2F, 0.5F, 1.0F, ThrustPulsingRegime::ON_PULSING};
 
@@ -51,26 +50,24 @@ TEST(ThrFiringSchmittConfigTest, RejectsInvalidParameters) {
     EXPECT_THROW(
         ThrFiringSchmittConfig::create(validArray, {0.75F, 0.25F, 0.2F, 0.5F, 0.99F, ThrustPulsingRegime::ON_PULSING}),
         fsw::invalid_argument);
-    // numThrusters exceeding the compile-time maximum
-    ThrFiringSchmittThrusterArray tooManyArray{};
-    tooManyArray.numThrusters = kMaxThrusterCount + 1U;
-    EXPECT_THROW(ThrFiringSchmittConfig::create(tooManyArray, validParams), fsw::invalid_argument);
     // Negative maxThrust
     ThrFiringSchmittThrusterArray negThrustArray{};
-    negThrustArray.numThrusters = 1;
+    negThrustArray.maxThrust.fill(1.0F);
     negThrustArray.maxThrust.at(0) = -0.1F;
     EXPECT_THROW(ThrFiringSchmittConfig::create(negThrustArray, validParams), fsw::invalid_argument);
+    // Zero maxThrust: every slot is a divisor now, so zero is rejected
+    ThrFiringSchmittThrusterArray zeroThrustArray{};
+    zeroThrustArray.maxThrust.fill(1.0F);
+    zeroThrustArray.maxThrust.at(0) = 0.0F;
+    EXPECT_THROW(ThrFiringSchmittConfig::create(zeroThrustArray, validParams), fsw::invalid_argument);
+    // A default-constructed array is all zeros, so it is rejected too
+    EXPECT_THROW(ThrFiringSchmittConfig::create(ThrFiringSchmittThrusterArray{}, validParams), fsw::invalid_argument);
 
     // Valid configuration is accepted
     EXPECT_NO_THROW(ThrFiringSchmittConfig::create(validArray, validParams));
     // onTimeSaturationFactor == 1.0 is allowed
     EXPECT_NO_THROW(
         ThrFiringSchmittConfig::create(validArray, {0.75F, 0.25F, 0.2F, 0.5F, 1.0F, ThrustPulsingRegime::ON_PULSING}));
-    // Zero maxThrust is allowed
-    ThrFiringSchmittThrusterArray zeroThrustArray{};
-    zeroThrustArray.numThrusters = 1;
-    zeroThrustArray.maxThrust.at(0) = 0.0F;
-    EXPECT_NO_THROW(ThrFiringSchmittConfig::create(zeroThrustArray, validParams));
 }
 
 // ---------------------------------------------------------------------------
@@ -82,9 +79,8 @@ TEST(ThrFiringSchmittTest, RegressionTest) {
                                    0.3F,
                                    0.01F,
                                    ThrustPulsingRegime::OFF_PULSING,
-                                   4U,
-                                   std::vector{3.1F, 4.2F, 5.3F, 6.4F},
-                                   std::vector{2.1F, 1.2F, 0.3F, 10.4F},
+                                   std::vector{3.1F, 4.2F, 5.3F, 6.4F, 7.5F, 8.6F, 9.7F, 10.8F},
+                                   std::vector{2.1F, 1.2F, 0.3F, 10.4F, 5.5F, 0.6F, 7.7F, 2.8F},
                                    0.1F);
 }
 
@@ -97,9 +93,8 @@ TEST(ThrFiringSchmittTest, OutputsAreWithinBounds) {
                                    0.25F,
                                    0.02F,
                                    ThrustPulsingRegime::ON_PULSING,
-                                   4U,
-                                   std::vector{0.5F, 0.5F, 0.5F, 0.5F},
-                                   std::vector{0.1F, 0.3F, 0.5F, 0.6F},
+                                   std::vector<float>(kMaxThrusterCount, 0.5F),
+                                   std::vector{0.1F, 0.3F, 0.5F, 0.6F, 0.2F, 0.4F, 0.7F, 0.05F},
                                    0.5F);
 }
 
@@ -108,9 +103,8 @@ TEST(ThrFiringSchmittTest, NonZeroOutputsExceedMinFireTime) {
                                             0.25F,
                                             0.2F,
                                             ThrustPulsingRegime::ON_PULSING,
-                                            4U,
-                                            std::vector{0.5F, 0.5F, 0.5F, 0.5F},
-                                            std::vector{0.1F, 0.3F, 0.5F, 0.05F},
+                                            std::vector<float>(kMaxThrusterCount, 0.5F),
+                                            std::vector{0.1F, 0.3F, 0.5F, 0.05F, 0.2F, 0.4F, 0.6F, 0.15F},
                                             0.5F);
 }
 
@@ -119,9 +113,8 @@ TEST(ThrFiringSchmittTest, OutputIsFinite) {
                            0.25F,
                            0.02F,
                            ThrustPulsingRegime::OFF_PULSING,
-                           4U,
-                           std::vector{0.5F, 0.5F, 0.5F, 0.5F},
-                           std::vector{-0.3F, -0.1F, 0.0F, -0.5F},
+                           std::vector<float>(kMaxThrusterCount, 0.5F),
+                           std::vector{-0.3F, -0.1F, 0.0F, -0.5F, -0.2F, -0.4F, 0.0F, -0.05F},
                            0.5F);
 }
 
@@ -130,17 +123,17 @@ TEST(ThrFiringSchmittTest, ResetClearsState) {
                              0.25F,
                              0.02F,
                              ThrustPulsingRegime::ON_PULSING,
-                             4U,
-                             std::vector{0.5F, 0.5F, 0.5F, 0.5F},
-                             std::vector{0.1F, 0.3F, 0.5F, 0.05F},
+                             std::vector<float>(kMaxThrusterCount, 0.5F),
+                             std::vector{0.1F, 0.3F, 0.5F, 0.05F, 0.2F, 0.4F, 0.6F, 0.15F},
                              0.5F);
 }
 
 TEST(ThrFiringSchmittTest, SaturatedInputProducesOversaturatedOutput) {
-    propertySaturatedInputProducesOversaturatedOutput(0.02F, 4U, std::vector{0.5F, 1.0F, 2.0F, 0.3F}, 0.5F);
+    propertySaturatedInputProducesOversaturatedOutput(
+        0.02F, std::vector{0.5F, 1.0F, 2.0F, 0.3F, 1.5F, 0.8F, 2.5F, 0.4F}, 0.5F);
 }
 
-TEST(ThrFiringSchmittTest, ZeroForceProducesZeroOutput) { propertyZeroForceProducesZeroOutput(0.02F, 4U, 0.5F); }
+TEST(ThrFiringSchmittTest, ZeroForceProducesZeroOutput) { propertyZeroForceProducesZeroOutput(0.02F, 0.5F); }
 
 // ---------------------------------------------------------------------------
 // Edge-case tests
@@ -148,7 +141,8 @@ TEST(ThrFiringSchmittTest, ZeroForceProducesZeroOutput) { propertyZeroForceProdu
 
 // Level exactly at levelOn threshold (strict >=) should turn thruster ON.
 TEST(ThrFiringSchmittTest, ExactlyAtLevelOn) {
-    auto alg = makeSchmittAlgorithm(0.75F, 0.25F, 0.2F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, 1U, {1.0F});
+    auto alg = makeSchmittAlgorithm(
+        0.75F, 0.25F, 0.2F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, std::vector<float>(kMaxThrusterCount, 1.0F));
 
     // onTime = F/Fmax * dt = F * 0.5; we want level = onTime/thrMinFireTime = 0.75
     // onTime = 0.75 * 0.2 = 0.15, so F = 0.15 / 0.5 = 0.3
@@ -161,7 +155,8 @@ TEST(ThrFiringSchmittTest, ExactlyAtLevelOn) {
 
 // Level exactly at levelOff threshold (strict <=) should turn thruster OFF.
 TEST(ThrFiringSchmittTest, ExactlyAtLevelOff) {
-    auto alg = makeSchmittAlgorithm(0.75F, 0.25F, 0.2F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, 1U, {1.0F});
+    auto alg = makeSchmittAlgorithm(
+        0.75F, 0.25F, 0.2F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, std::vector<float>(kMaxThrusterCount, 1.0F));
 
     // level = 0.25, onTime = 0.25 * 0.2 = 0.05, F = 0.05 / 0.5 = 0.1
     ThrusterForceCmd cmd{};
@@ -173,7 +168,8 @@ TEST(ThrFiringSchmittTest, ExactlyAtLevelOff) {
 
 // Hysteresis: once ON via Schmitt, stays ON in the hysteresis band.
 TEST(ThrFiringSchmittTest, HysteresisStaysOn) {
-    auto alg = makeSchmittAlgorithm(0.75F, 0.25F, 0.2F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, 1U, {1.0F});
+    auto alg = makeSchmittAlgorithm(
+        0.75F, 0.25F, 0.2F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, std::vector<float>(kMaxThrusterCount, 1.0F));
 
     // First: level = 0.75 (at levelOn) -> turns ON
     ThrusterForceCmd cmdOn{};
@@ -190,7 +186,8 @@ TEST(ThrFiringSchmittTest, HysteresisStaysOn) {
 
 // Hysteresis: once OFF via Schmitt, stays OFF in the hysteresis band.
 TEST(ThrFiringSchmittTest, HysteresisStaysOff) {
-    auto alg = makeSchmittAlgorithm(0.75F, 0.25F, 0.2F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, 1U, {1.0F});
+    auto alg = makeSchmittAlgorithm(
+        0.75F, 0.25F, 0.2F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, std::vector<float>(kMaxThrusterCount, 1.0F));
 
     // First: level = 0.25 (at levelOff) -> turns OFF
     ThrusterForceCmd cmdOff{};
@@ -207,7 +204,8 @@ TEST(ThrFiringSchmittTest, HysteresisStaysOff) {
 
 // On-time exactly at controlPeriod triggers saturation (strict >=).
 TEST(ThrFiringSchmittTest, ExactlyAtControlPeriod) {
-    auto alg = makeSchmittAlgorithm(0.75F, 0.25F, 0.02F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.1F, 1U, {1.0F});
+    auto alg = makeSchmittAlgorithm(
+        0.75F, 0.25F, 0.02F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.1F, std::vector<float>(kMaxThrusterCount, 1.0F));
 
     // F = maxThrust -> onTime = 1.0/1.0 * 0.5 = 0.5 == controlPeriod -> saturates
     ThrusterForceCmd cmd{};
@@ -219,7 +217,8 @@ TEST(ThrFiringSchmittTest, ExactlyAtControlPeriod) {
 
 // On-time exactly at thrMinFireTime is in normal range (not Schmitt trigger).
 TEST(ThrFiringSchmittTest, ExactlyAtMinFireTime) {
-    auto alg = makeSchmittAlgorithm(0.75F, 0.25F, 0.2F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, 1U, {1.0F});
+    auto alg = makeSchmittAlgorithm(
+        0.75F, 0.25F, 0.2F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, std::vector<float>(kMaxThrusterCount, 1.0F));
 
     // onTime = F/Fmax * dt = F * 0.5; want onTime = 0.2, so F = 0.4
     ThrusterForceCmd cmd{};
@@ -229,9 +228,10 @@ TEST(ThrFiringSchmittTest, ExactlyAtMinFireTime) {
     EXPECT_FLOAT_EQ(out.onTimeRequest.at(0), 0.2F);  // normal range, not Schmitt
 }
 
-// Zero thrusters produces empty (all-zero) output.
-TEST(ThrFiringSchmittTest, ZeroThrusters) {
-    auto alg = makeSchmittAlgorithm(0.75F, 0.25F, 0.02F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, 0U, {});
+// Zero force on every thruster produces all-zero output.
+TEST(ThrFiringSchmittTest, ZeroForceOnAllThrusters) {
+    auto alg = makeSchmittAlgorithm(
+        0.75F, 0.25F, 0.02F, ThrustPulsingRegime::ON_PULSING, 0.5F, 1.0F, std::vector<float>(kMaxThrusterCount, 1.0F));
 
     ThrusterForceCmd cmd{};
     auto out = alg.update(cmd);
@@ -243,7 +243,8 @@ TEST(ThrFiringSchmittTest, ZeroThrusters) {
 
 // Off-pulsing: force of -maxThrust produces zero output (effective force = 0 after clamp).
 TEST(ThrFiringSchmittTest, OffPulsingMaxNegativeForce) {
-    auto alg = makeSchmittAlgorithm(0.75F, 0.25F, 0.02F, ThrustPulsingRegime::OFF_PULSING, 0.5F, 1.0F, 1U, {0.5F});
+    auto alg = makeSchmittAlgorithm(
+        0.75F, 0.25F, 0.02F, ThrustPulsingRegime::OFF_PULSING, 0.5F, 1.0F, std::vector<float>(kMaxThrusterCount, 0.5F));
 
     // F = -0.5, after adding maxThrust: 0.0, onTime = 0.0 -> zero
     ThrusterForceCmd cmd{};

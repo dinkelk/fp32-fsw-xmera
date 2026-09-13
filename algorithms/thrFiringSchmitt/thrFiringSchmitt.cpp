@@ -28,11 +28,10 @@ void ThrFiringSchmitt::reset(uint64_t callTime) {
 }
 
 ThrFiringSchmittConfig ThrFiringSchmitt::toConfig() {
-    const auto [numThrusters, thrusters] = this->thrConfInMsg();
+    const auto thrConfig = this->thrConfInMsg();
     ThrFiringSchmittThrusterArray thrusterArray{};
-    thrusterArray.numThrusters = numThrusters;
-    for (std::uint32_t i = 0U; i < numThrusters && i < kMaxThrusterCount; ++i) {
-        thrusterArray.maxThrust.at(i) = thrusters[i].maxThrust;
+    for (std::uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
+        thrusterArray.maxThrust.at(i) = thrConfig.thrusters[i].maxThrust;
     }
 
     const ThrFiringSchmittControlParameters controlParameters{this->levelOn,

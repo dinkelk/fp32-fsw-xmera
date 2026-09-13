@@ -23,11 +23,9 @@ inline ThrFiringSchmittAlgorithm makeSchmittAlgorithm(float levelOn,
                                                       ThrustPulsingRegime thrustPulsingRegime,
                                                       float controlPeriod,
                                                       float onTimeSaturationFactor,
-                                                      uint32_t numThrusters,
                                                       const std::vector<float>& maxThrustVec) {
     ThrFiringSchmittThrusterArray thrusterArray{};
-    thrusterArray.numThrusters = numThrusters;
-    for (uint32_t i = 0U; i < numThrusters && i < kMaxThrusterCount; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         thrusterArray.maxThrust.at(i) = maxThrustVec.at(i);
     }
     const ThrFiringSchmittControlParameters params{
@@ -41,7 +39,6 @@ inline ReferenceOutput referenceUpdate(float levelOn,
                                        float thrMinFireTime,
                                        float onTimeSaturationFactor,
                                        ThrustPulsingRegime thrustPulsingRegime,
-                                       uint32_t numThrusters,
                                        std::array<float, kMaxThrusterCount> maxThrust,
                                        std::array<bool, kMaxThrusterCount> lastThrustState,
                                        float controlPeriod,
@@ -49,7 +46,7 @@ inline ReferenceOutput referenceUpdate(float levelOn,
     ThrusterOnTimeCmd thrOnTimeOut{};
 
     /*! - Loop through thrusters */
-    for (uint32_t i = 0U; i < numThrusters; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         /*! - Correct for off-pulsing if necessary.  Here the requested force is negative, and the maximum thrust
          needs to be added.  If not control force is requested in off-pulsing mode, then the thruster force should
          be set to the maximum thrust value */
@@ -108,7 +105,6 @@ inline void testThrFiringSchmittRegression(float levelOn,
                                            float levelOff,
                                            float thrMinFireTime,
                                            ThrustPulsingRegime thrustPulsingRegime,
-                                           uint32_t numThrusters,
                                            std::vector<float> maxThrustVec,
                                            std::vector<float> thrForceVec,
                                            float dt) {
@@ -120,25 +116,15 @@ inline void testThrFiringSchmittRegression(float levelOn,
 
     constexpr float kOnTimeSaturationFactor = 1.0F;
 
-    // Every other read of a thruster slot goes through at(), which throws on an out of range count. This copy
-    // is the one unchecked write, so bound it by both the input length and the array the mission sizes.
     std::array<float, kMaxThrusterCount> maxThrust{};
-    std::copy_n(maxThrustVec.begin(),
-                std::min(maxThrustVec.size(), static_cast<std::size_t>(kMaxThrusterCount)),
-                maxThrust.begin());
+    std::copy_n(maxThrustVec.begin(), kMaxThrusterCount, maxThrust.begin());
 
-    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(levelOn,
-                                                         levelOff,
-                                                         thrMinFireTime,
-                                                         thrustPulsingRegime,
-                                                         dt,
-                                                         kOnTimeSaturationFactor,
-                                                         numThrusters,
-                                                         maxThrustVec);
+    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(
+        levelOn, levelOff, thrMinFireTime, thrustPulsingRegime, dt, kOnTimeSaturationFactor, maxThrustVec);
 
     // Populate force command
     ThrusterForceCmd thrForceCmd{};
-    for (uint32_t i = 0U; i < numThrusters; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         thrForceCmd.thrForce.at(i) = thrForceVec.at(i);
     }
 
@@ -158,7 +144,6 @@ inline void testThrFiringSchmittRegression(float levelOn,
                                                     thrMinFireTime,
                                                     kOnTimeSaturationFactor,
                                                     thrustPulsingRegime,
-                                                    numThrusters,
                                                     maxThrust,
                                                     lastThrustState,
                                                     dt,
@@ -166,7 +151,7 @@ inline void testThrFiringSchmittRegression(float levelOn,
         ThrusterOnTimeCmd ref = refOutput.onTime;
         lastThrustState = refOutput.lastThrustState;
 
-        for (uint32_t i = 0U; i < numThrusters; ++i) {
+        for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
             // Reference correctness
             EXPECT_NEAR(out.onTimeRequest.at(i), ref.onTimeRequest.at(i), 1e-6);
         }
@@ -182,7 +167,6 @@ inline void propertyOutputsAreWithinBounds(float levelOn,
                                            float levelOff,
                                            float thrMinFireTime,
                                            ThrustPulsingRegime thrustPulsingRegime,
-                                           uint32_t numThrusters,
                                            std::vector<float> maxThrustVec,
                                            std::vector<float> thrForceVec,
                                            float dt) {
@@ -191,17 +175,11 @@ inline void propertyOutputsAreWithinBounds(float levelOn,
     }
 
     constexpr float kOnTimeSaturationFactor = 1.0F;
-    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(levelOn,
-                                                         levelOff,
-                                                         thrMinFireTime,
-                                                         thrustPulsingRegime,
-                                                         dt,
-                                                         kOnTimeSaturationFactor,
-                                                         numThrusters,
-                                                         maxThrustVec);
+    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(
+        levelOn, levelOff, thrMinFireTime, thrustPulsingRegime, dt, kOnTimeSaturationFactor, maxThrustVec);
 
     ThrusterForceCmd cmd{};
-    for (uint32_t i = 0U; i < numThrusters; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         cmd.thrForce.at(i) = thrForceVec.at(i);
     }
 
@@ -209,7 +187,7 @@ inline void propertyOutputsAreWithinBounds(float levelOn,
 
     for (int step = 0; step < 5; ++step) {
         auto out = alg.update(cmd);
-        for (uint32_t i = 0U; i < numThrusters; ++i) {
+        for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
             EXPECT_GE(out.onTimeRequest.at(i), 0.0F);
             EXPECT_LE(out.onTimeRequest.at(i), maxBound + 1e-6F);
         }
@@ -221,7 +199,6 @@ inline void propertyNonZeroOutputsExceedMinFireTime(float levelOn,
                                                     float levelOff,
                                                     float thrMinFireTime,
                                                     ThrustPulsingRegime thrustPulsingRegime,
-                                                    uint32_t numThrusters,
                                                     std::vector<float> maxThrustVec,
                                                     std::vector<float> thrForceVec,
                                                     float dt) {
@@ -230,17 +207,11 @@ inline void propertyNonZeroOutputsExceedMinFireTime(float levelOn,
     }
 
     constexpr float kOnTimeSaturationFactor = 1.0F;
-    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(levelOn,
-                                                         levelOff,
-                                                         thrMinFireTime,
-                                                         thrustPulsingRegime,
-                                                         dt,
-                                                         kOnTimeSaturationFactor,
-                                                         numThrusters,
-                                                         maxThrustVec);
+    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(
+        levelOn, levelOff, thrMinFireTime, thrustPulsingRegime, dt, kOnTimeSaturationFactor, maxThrustVec);
 
     ThrusterForceCmd cmd{};
-    for (uint32_t i = 0U; i < numThrusters; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         cmd.thrForce.at(i) = thrForceVec.at(i);
     }
 
@@ -248,7 +219,7 @@ inline void propertyNonZeroOutputsExceedMinFireTime(float levelOn,
 
     for (int step = 0; step < 5; ++step) {
         auto out = alg.update(cmd);
-        for (uint32_t i = 0U; i < numThrusters; ++i) {
+        for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
             if (out.onTimeRequest.at(i) > 0.0F) {
                 EXPECT_GE(out.onTimeRequest.at(i), effectiveMin - 1e-6F);
             }
@@ -261,7 +232,6 @@ inline void propertyOutputIsFinite(float levelOn,
                                    float levelOff,
                                    float thrMinFireTime,
                                    ThrustPulsingRegime thrustPulsingRegime,
-                                   uint32_t numThrusters,
                                    std::vector<float> maxThrustVec,
                                    std::vector<float> thrForceVec,
                                    float dt) {
@@ -270,23 +240,17 @@ inline void propertyOutputIsFinite(float levelOn,
     }
 
     constexpr float kOnTimeSaturationFactor = 1.0F;
-    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(levelOn,
-                                                         levelOff,
-                                                         thrMinFireTime,
-                                                         thrustPulsingRegime,
-                                                         dt,
-                                                         kOnTimeSaturationFactor,
-                                                         numThrusters,
-                                                         maxThrustVec);
+    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(
+        levelOn, levelOff, thrMinFireTime, thrustPulsingRegime, dt, kOnTimeSaturationFactor, maxThrustVec);
 
     ThrusterForceCmd cmd{};
-    for (uint32_t i = 0U; i < numThrusters; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         cmd.thrForce.at(i) = thrForceVec.at(i);
     }
 
     for (int step = 0; step < 5; ++step) {
         auto out = alg.update(cmd);
-        for (uint32_t i = 0U; i < numThrusters; ++i) {
+        for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
             EXPECT_TRUE(std::isfinite(out.onTimeRequest.at(i)));
         }
     }
@@ -297,7 +261,6 @@ inline void propertyResetClearsState(float levelOn,
                                      float levelOff,
                                      float thrMinFireTime,
                                      ThrustPulsingRegime thrustPulsingRegime,
-                                     uint32_t numThrusters,
                                      std::vector<float> maxThrustVec,
                                      std::vector<float> thrForceVec,
                                      float dt) {
@@ -306,17 +269,11 @@ inline void propertyResetClearsState(float levelOn,
     }
 
     constexpr float kOnTimeSaturationFactor = 1.0F;
-    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(levelOn,
-                                                         levelOff,
-                                                         thrMinFireTime,
-                                                         thrustPulsingRegime,
-                                                         dt,
-                                                         kOnTimeSaturationFactor,
-                                                         numThrusters,
-                                                         maxThrustVec);
+    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(
+        levelOn, levelOff, thrMinFireTime, thrustPulsingRegime, dt, kOnTimeSaturationFactor, maxThrustVec);
 
     ThrusterForceCmd cmd{};
-    for (uint32_t i = 0U; i < numThrusters; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         cmd.thrForce.at(i) = thrForceVec.at(i);
     }
 
@@ -330,14 +287,13 @@ inline void propertyResetClearsState(float levelOn,
     alg.reInitialize();
     auto out2 = alg.update(cmd);
 
-    for (uint32_t i = 0U; i < numThrusters; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         EXPECT_FLOAT_EQ(out1.onTimeRequest.at(i), out2.onTimeRequest.at(i));
     }
 }
 
 // Saturated input (force == maxThrust for ON_PULSING) produces oversaturated output.
 inline void propertySaturatedInputProducesOversaturatedOutput(float thrMinFireTime,
-                                                              uint32_t numThrusters,
                                                               std::vector<float> maxThrustVec,
                                                               float dt) {
     if (dt < thrMinFireTime) {
@@ -345,49 +301,37 @@ inline void propertySaturatedInputProducesOversaturatedOutput(float thrMinFireTi
     }
 
     constexpr float kOnTimeSaturationFactor = 1.0F;
-    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(0.75F,
-                                                         0.25F,
-                                                         thrMinFireTime,
-                                                         ThrustPulsingRegime::ON_PULSING,
-                                                         dt,
-                                                         kOnTimeSaturationFactor,
-                                                         numThrusters,
-                                                         maxThrustVec);
+    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(
+        0.75F, 0.25F, thrMinFireTime, ThrustPulsingRegime::ON_PULSING, dt, kOnTimeSaturationFactor, maxThrustVec);
 
     // Force == maxThrust → onTime == controlPeriod → saturates
     ThrusterForceCmd cmd{};
-    for (uint32_t i = 0U; i < numThrusters; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         cmd.thrForce.at(i) = maxThrustVec.at(i);
     }
 
     const float expected = kOnTimeSaturationFactor * dt;
     auto out = alg.update(cmd);
-    for (uint32_t i = 0U; i < numThrusters; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         EXPECT_NEAR(out.onTimeRequest.at(i), expected, 1e-6F);
     }
 }
 
 // Zero force with ON_PULSING produces zero output.
-inline void propertyZeroForceProducesZeroOutput(float thrMinFireTime, uint32_t numThrusters, float dt) {
+inline void propertyZeroForceProducesZeroOutput(float thrMinFireTime, float dt) {
     if (dt < thrMinFireTime) {
         return;
     }
 
     constexpr float kOnTimeSaturationFactor = 1.0F;
     const std::vector<float> maxThrustVec(kMaxThrusterCount, 1.0F);
-    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(0.75F,
-                                                         0.25F,
-                                                         thrMinFireTime,
-                                                         ThrustPulsingRegime::ON_PULSING,
-                                                         dt,
-                                                         kOnTimeSaturationFactor,
-                                                         numThrusters,
-                                                         maxThrustVec);
+    ThrFiringSchmittAlgorithm alg = makeSchmittAlgorithm(
+        0.75F, 0.25F, thrMinFireTime, ThrustPulsingRegime::ON_PULSING, dt, kOnTimeSaturationFactor, maxThrustVec);
 
     ThrusterForceCmd cmd{};  // all zeros
 
     auto out = alg.update(cmd);
-    for (uint32_t i = 0U; i < numThrusters; ++i) {
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         EXPECT_FLOAT_EQ(out.onTimeRequest.at(i), 0.0F);
     }
 }

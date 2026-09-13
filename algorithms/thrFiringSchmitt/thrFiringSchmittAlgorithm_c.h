@@ -21,8 +21,7 @@ uint32_t ThrFiringSchmittAlgorithm_getMaxThrusterCount(void);
 
 /**
  * @brief Report whether a configuration would be accepted by create/setConfig.
- * @param numThrusters           [-] Number of thrusters on the vehicle.
- * @param maxThrust              [N] Per-thruster maximum thrust; the first numThrusters entries are used.
+ * @param maxThrust              [N] Per-thruster maximum thrust; every entry must be finite and > 0.
  * @param levelOn                [-] ON duty cycle fraction threshold, in (0, 1].
  * @param levelOff               [-] OFF duty cycle fraction threshold, in [0, 1).
  * @param thrMinFireTime         [s] Minimum commandable thruster fire time.
@@ -32,8 +31,7 @@ uint32_t ThrFiringSchmittAlgorithm_getMaxThrusterCount(void);
  * @return true if the configuration is valid. Never throws, so it can guard the
  *         throwing create/setConfig from an invalid configuration.
  */
-bool ThrFiringSchmittAlgorithm_validateConfig(uint32_t numThrusters,
-                                              float maxThrust[MAX_EFF_CNT],
+bool ThrFiringSchmittAlgorithm_validateConfig(float maxThrust[MAX_EFF_CNT],
                                               float levelOn,
                                               float levelOff,
                                               float thrMinFireTime,
@@ -43,8 +41,7 @@ bool ThrFiringSchmittAlgorithm_validateConfig(uint32_t numThrusters,
 
 /**
  * @brief Construct a new ThrFiringSchmittAlgorithm instance from the supplied configuration.
- * @param numThrusters           [-] Number of thrusters on the vehicle.
- * @param maxThrust              [N] Per-thruster maximum thrust; the first numThrusters entries are used.
+ * @param maxThrust              [N] Per-thruster maximum thrust; every entry must be finite and > 0.
  * @param levelOn                [-] ON duty cycle fraction threshold, in (0, 1].
  * @param levelOff               [-] OFF duty cycle fraction threshold, in [0, 1).
  * @param thrMinFireTime         [s] Minimum commandable thruster fire time.
@@ -53,8 +50,7 @@ bool ThrFiringSchmittAlgorithm_validateConfig(uint32_t numThrusters,
  * @param pulsingRegime          [-] On-pulsing or off-pulsing.
  * @return Pointer to a new ThrFiringSchmittAlgorithm (must be destroyed). Throws on invalid input.
  */
-ThrFiringSchmittAlgorithmHandle* ThrFiringSchmittAlgorithm_create(uint32_t numThrusters,
-                                                                  float maxThrust[MAX_EFF_CNT],
+ThrFiringSchmittAlgorithmHandle* ThrFiringSchmittAlgorithm_create(float maxThrust[MAX_EFF_CNT],
                                                                   float levelOn,
                                                                   float levelOff,
                                                                   float thrMinFireTime,
@@ -71,8 +67,7 @@ void ThrFiringSchmittAlgorithm_destroy(ThrFiringSchmittAlgorithmHandle* self);
 /**
  * @brief Replace the algorithm's configuration at runtime. The Schmitt-trigger state is preserved.
  * @param self                   Pointer to the instance.
- * @param numThrusters           [-] Number of thrusters on the vehicle.
- * @param maxThrust              [N] Per-thruster maximum thrust; the first numThrusters entries are used.
+ * @param maxThrust              [N] Per-thruster maximum thrust; every entry must be finite and > 0.
  * @param levelOn                [-] ON duty cycle fraction threshold, in (0, 1].
  * @param levelOff               [-] OFF duty cycle fraction threshold, in [0, 1).
  * @param thrMinFireTime         [s] Minimum commandable thruster fire time.
@@ -82,7 +77,6 @@ void ThrFiringSchmittAlgorithm_destroy(ThrFiringSchmittAlgorithmHandle* self);
  * @note Throws on invalid input.
  */
 void ThrFiringSchmittAlgorithm_setConfig(ThrFiringSchmittAlgorithmHandle* self,
-                                         uint32_t numThrusters,
                                          float maxThrust[MAX_EFF_CNT],
                                          float levelOn,
                                          float levelOff,

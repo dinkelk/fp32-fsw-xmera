@@ -36,8 +36,8 @@ provides information on what this message is used for.
       - Description
     * - thrConfInMsg
       - :ref:`THRArrayConfigMsgF32Payload`
-      - Read in ``reset()`` and again in ``reconfigure()``. Contains ``numThrusters`` and per-thruster max
-        thrust.
+      - Read in ``reset()`` and again in ``reconfigure()``. Supplies the per-thruster max thrust for all
+        ``MAX_EFF_CNT`` thrusters. Every entry must be finite and greater than zero.
     * - thrForceInMsg
       - :ref:`THRArrayCmdForceMsgF32Payload`
       - Read every ``updateState()``. Provides commanded forces :math:`F_i`. Values may be negative in
