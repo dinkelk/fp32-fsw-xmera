@@ -23,11 +23,10 @@ void ThrFiringRemainder::reset(uint64_t callTime) {
     }
 
     /*! - read in the thruster configuration message and map to the validated thruster array */
-    const auto [numThrusters, thrusters] = this->thrConfInMsg();
+    const auto thrConfig = this->thrConfInMsg();
     ThrFiringRemainderThrusterArray thrusterArray{};
-    thrusterArray.numThrusters = numThrusters;
-    for (std::uint32_t i = 0U; i < numThrusters && i < kMaxThrusterCount; ++i) {
-        thrusterArray.maxThrust.at(i) = thrusters[i].maxThrust;
+    for (std::uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
+        thrusterArray.maxThrust.at(i) = thrConfig.thrusters[i].maxThrust;
     }
 
     const ThrFiringControlParameters controlParameters{
@@ -38,11 +37,10 @@ void ThrFiringRemainder::reset(uint64_t callTime) {
 }
 
 ThrFiringRemainderConfig ThrFiringRemainder::toConfig() {
-    const auto [numThrusters, thrusters] = this->thrConfInMsg();
+    const auto thrConfig = this->thrConfInMsg();
     ThrFiringRemainderThrusterArray thrusterArray{};
-    thrusterArray.numThrusters = numThrusters;
-    for (std::uint32_t i = 0U; i < numThrusters && i < kMaxThrusterCount; ++i) {
-        thrusterArray.maxThrust.at(i) = thrusters[i].maxThrust;
+    for (std::uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
+        thrusterArray.maxThrust.at(i) = thrConfig.thrusters[i].maxThrust;
     }
 
     const ThrFiringControlParameters controlParameters{

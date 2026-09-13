@@ -27,7 +27,7 @@ ThrusterOnTimeCmd ThrFiringRemainderAlgorithm::update(ThrusterForceCmd thrusterF
     const ThrFiringControlParameters& params = this->cfg.getControlParameters();
 
     /*! - Loop through thrusters */
-    for (std::uint32_t i = 0U; i < thrusterArray.numThrusters; ++i) {
+    for (std::uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
         /*! - Correct for off-pulsing if necessary.  Here the requested force is negative, and the maximum thrust
          needs to be added.  If not control force is requested in off-pulsing mode, then the thruster force should
          be set to the maximum thrust value */
