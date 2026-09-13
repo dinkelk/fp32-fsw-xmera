@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <iterator>
 #include <numeric>
 
 RegionsOfInterestPruneAlgorithm::RegionsOfInterestPruneAlgorithm(const RegionsOfInterestPruneConfig& config)
@@ -43,10 +44,10 @@ RoiCandidates RegionsOfInterestPruneAlgorithm::update(const uint16_t* rowSums,
 */
 // NOLINTBEGIN(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- s is a raw C array mirroring the
 // message payload's void* pointer field; indexing it directly is the natural, minimal representation.
-std::pair<RegionsOfInterestPruneAlgorithm::SpanVec, RegionsOfInterestPruneAlgorithm::AccumVec>
+std::pair<RegionsOfInterestPruneAlgorithm::SpanArray, RegionsOfInterestPruneAlgorithm::AccumArray>
 RegionsOfInterestPruneAlgorithm::findSpans(const uint16_t* s, uint32_t n) {
-    SpanVec spans;
-    AccumVec accum;
+    SpanArray spans;
+    AccumArray accum;
     for (uint32_t i = 0; i < n;) {
         if (s[i] != 0) {
             uint32_t j = i;
@@ -54,8 +55,12 @@ RegionsOfInterestPruneAlgorithm::findSpans(const uint16_t* s, uint32_t n) {
             while (j < n && s[j] != 0) {
                 sum += s[j++];
             }
-            spans.emplace_back(i, j - i);
-            accum.push_back(sum);
+            if (spans.count < MAX_SPANS) {
+                spans.data[spans.count] = {i, j - i};
+                accum.data[accum.count] = sum;
+                ++spans.count;
+                ++accum.count;
+            }
             i = j;
         } else {
             ++i;
@@ -67,20 +72,28 @@ RegionsOfInterestPruneAlgorithm::findSpans(const uint16_t* s, uint32_t n) {
 
 /*! Returns the indices of the top-keep entries of vals ordered by descending value.
  *  Uses std::ranges::partial_sort so only the retained portion is fully sorted (O(N log keep)).
- @return Vector of at most keep indices into vals, sorted by vals[i] descending.
+ @return AccumArray of at most keep indices into vals, sorted by vals[i] descending.
  @param vals  Accumulator values to rank.
  @param keep  Maximum number of top entries to retain.
 */
-RegionsOfInterestPruneAlgorithm::AccumVec RegionsOfInterestPruneAlgorithm::topIndices(const AccumVec& vals,
-                                                                                      uint32_t keep) {
-    AccumVec idx(vals.size());
+RegionsOfInterestPruneAlgorithm::AccumArray RegionsOfInterestPruneAlgorithm::topIndices(const AccumArray& vals,
+                                                                                        uint32_t keep) {
+    AccumArray idx;
+    // vals.count <= MAX_SPANS is guaranteed because AccumArray values are produced by
+    // findSpans(), which caps the number of stored entries at MAX_SPANS.
+    const uint32_t n = vals.count;
     // std::ranges::iota isn't implemented in this project's libc++ yet, despite being valid
     // C++23; plain std::iota is the portable choice.
     // NOLINTNEXTLINE(modernize-use-ranges)
-    std::iota(idx.begin(), idx.end(), 0);
-    keep = std::min(keep, static_cast<uint32_t>(vals.size()));
-    std::ranges::partial_sort(idx, idx.begin() + keep, std::greater{}, [&vals](uint32_t i) { return vals[i]; });
-    idx.resize(keep);
+    std::iota(idx.data.begin(), std::next(idx.data.begin(), n), 0);  // only initialize n valid slots
+    keep = std::min(keep, n);                                        // use logical count
+    std::ranges::partial_sort(idx.data.begin(),
+                              std::next(idx.data.begin(), keep),
+                              std::next(idx.data.begin(), n),
+                              std::greater{},
+                              [&vals](uint32_t i) { return vals.data[i]; });  // sort only valid slots
+    idx.count = keep;                                                         // record logical size
+
     return idx;
 }
 
@@ -97,18 +110,22 @@ RegionsOfInterestPruneAlgorithm::AccumVec RegionsOfInterestPruneAlgorithm::topIn
 */
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) -- R/rowIdx and C/colIdx are legitimately paired,
 // documented adjacent inputs (an accumulator plus its pre-filtered index list); this shape is intentional.
-std::vector<RoiCandidateEntry> RegionsOfInterestPruneAlgorithm::buildCandidates(const SpanVec& rowSpans,
-                                                                                const AccumVec& R,
-                                                                                const AccumVec& rowIdx,
-                                                                                const SpanVec& colSpans,
-                                                                                const AccumVec& C,
-                                                                                const AccumVec& colIdx) {
-    std::vector<RoiCandidateEntry> candidates;
-    for (const uint32_t ki : rowIdx) {
-        for (const uint32_t li : colIdx) {
-            const auto [r, h] = rowSpans[ki];
-            const auto [c, w] = colSpans[li];
-            candidates.push_back({r, c, h, w, std::min(R[ki], C[li])});
+RegionsOfInterestPruneAlgorithm::CandidateArray RegionsOfInterestPruneAlgorithm::buildCandidates(
+    const SpanArray& rowSpans,
+    const AccumArray& R,
+    const AccumArray& rowIdx,
+    const SpanArray& colSpans,
+    const AccumArray& C,
+    const AccumArray& colIdx) {
+    CandidateArray candidates;
+    for (uint32_t a = 0; a < rowIdx.count; ++a) {
+        const uint32_t ki = rowIdx.data[a];
+        for (uint32_t b = 0; b < colIdx.count; ++b) {
+            const uint32_t li = colIdx.data[b];
+            const auto [r, h] = rowSpans.data[ki];
+            const auto [c, w] = colSpans.data[li];
+            candidates.data[candidates.count++] = {
+                .row = r, .col = c, .height = h, .width = w, .count = std::min(R.data[ki], C.data[li])};
         }
     }
     return candidates;
@@ -120,21 +137,20 @@ std::vector<RoiCandidateEntry> RegionsOfInterestPruneAlgorithm::buildCandidates(
  @return RoiCandidates with numCandidates set and candidates[0] = rank-1.
  @param candidates  Unsorted candidate list (taken by value; sorted in-place).
 */
-RoiCandidates RegionsOfInterestPruneAlgorithm::packOutput(std::vector<RoiCandidateEntry> candidates) {
-    std::ranges::sort(candidates, [](const RoiCandidateEntry& a, const RoiCandidateEntry& b) {
-        if (a.count != b.count) {
-            return a.count > b.count;
-        }
-        return a.height * a.width < b.height * b.width;
-    });
-    if (candidates.size() > ROI_CANDIDATES_MAX) {
-        candidates.resize(ROI_CANDIDATES_MAX);
-    }
+RoiCandidates RegionsOfInterestPruneAlgorithm::packOutput(CandidateArray candidates) {
+    std::ranges::sort(candidates.data.begin(),
+                      std::next(candidates.data.begin(), candidates.count),
+                      [](const RoiCandidateEntry& a, const RoiCandidateEntry& b) {
+                          if (a.count != b.count) {
+                              return a.count > b.count;
+                          }
+                          return a.height * a.width < b.height * b.width;
+                      });
 
     RoiCandidates outRoi{};
-    outRoi.numCandidates = static_cast<uint32_t>(candidates.size());
+    outRoi.numCandidates = std::min(candidates.count, ROI_CANDIDATES_MAX);
     for (uint32_t i = 0; i < outRoi.numCandidates; ++i) {
-        outRoi.candidates[i] = candidates[i];
+        outRoi.candidates[i] = candidates.data[i];
     }
     return outRoi;
 }

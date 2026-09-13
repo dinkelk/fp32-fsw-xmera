@@ -6,11 +6,15 @@
 #include <array>
 #include <cstdint>
 #include <utility>
-#include <vector>
 
 static constexpr uint32_t ROI_CANDIDATES_MAX = 16;    //!< Maximum number of candidates retained/published
 static constexpr uint32_t DEFAULT_MAX_ROW_SPANS = 3;  //!< Default value for maxRowSpans
 static constexpr uint32_t DEFAULT_MAX_COL_SPANS = 3;  //!< Default value for maxColSpans
+
+//!< Maximum contiguous non-zero spans tracked per row/col scan; any beyond this are dropped.
+static constexpr uint32_t MAX_SPANS = 128;
+//!< Worst-case row-span x col-span cross-product size, before ranking/truncation to ROI_CANDIDATES_MAX.
+static constexpr uint32_t MAX_RAW_CANDIDATES = MAX_SPANS * MAX_SPANS;
 
 /*! @brief Internal bounding-box candidate (corner coordinates + pixel count). */
 struct RoiCandidateEntry {
@@ -78,25 +82,39 @@ class RegionsOfInterestPruneAlgorithm final {
     RegionsOfInterestPruneConfig cfg;
 
     using Span = std::pair<uint32_t, uint32_t>;
-    using SpanVec = std::vector<Span>;
-    using AccumVec = std::vector<uint32_t>;
+
+    //!< Fixed-capacity span list: data[0..count) are the valid entries.
+    struct SpanArray {
+        uint32_t count{};
+        std::array<Span, MAX_SPANS> data{};
+    };
+    //!< Fixed-capacity value/index list: data[0..count) are the valid entries.
+    struct AccumArray {
+        uint32_t count{};
+        std::array<uint32_t, MAX_SPANS> data{};
+    };
+    //!< Fixed-capacity candidate list: data[0..count) are the valid entries.
+    struct CandidateArray {
+        uint32_t count{};
+        std::array<RoiCandidateEntry, MAX_RAW_CANDIDATES> data{};
+    };
 
     // Step 1: find contiguous non-zero spans and accumulate per-span sums.
-    static std::pair<SpanVec, AccumVec> findSpans(const uint16_t* s, uint32_t n);
+    static std::pair<SpanArray, AccumArray> findSpans(const uint16_t* s, uint32_t n);
 
     // Step 2: return indices of the top-keep entries in vals (by descending value).
-    static AccumVec topIndices(const AccumVec& vals, uint32_t keep);
+    static AccumArray topIndices(const AccumArray& vals, uint32_t keep);
 
     // Step 3: cross-product of filtered row/col spans → bounding-box candidates.
-    static std::vector<RoiCandidateEntry> buildCandidates(const SpanVec& rowSpans,
-                                                          const AccumVec& R,
-                                                          const AccumVec& rowIdx,
-                                                          const SpanVec& colSpans,
-                                                          const AccumVec& C,
-                                                          const AccumVec& colIdx);
+    static CandidateArray buildCandidates(const SpanArray& rowSpans,
+                                          const AccumArray& R,
+                                          const AccumArray& rowIdx,
+                                          const SpanArray& colSpans,
+                                          const AccumArray& C,
+                                          const AccumArray& colIdx);
 
     // Step 4: sort candidates by count descending, truncate, and pack the result.
-    static RoiCandidates packOutput(std::vector<RoiCandidateEntry> candidates);
+    static RoiCandidates packOutput(CandidateArray candidates);
 };
 
 #endif
