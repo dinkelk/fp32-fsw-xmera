@@ -113,6 +113,7 @@ add_subdirectory(algorithms/utilities/fsw)
 
 # "rwMotorVoltage" "stepperMotorController"
 set(algorithms
+    "regionsOfInterestPrune"
     "cobConverter"
     "attTrackingError"
     "axisToGimbalAngles"
