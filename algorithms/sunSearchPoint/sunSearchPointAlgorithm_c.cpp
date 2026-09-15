@@ -8,8 +8,8 @@
 #include <Eigen/Core>
 #include <array>
 
-static_assert(SUN_SEARCH_POINT_NUM_ROTATIONS == kNumRotations,
-              "C-shim rotation count must match the algorithm's kNumRotations");
+static_assert(SUN_SEARCH_POINT_NUM_ROTATIONS == kNumSunSearchRotations,
+              "C-shim rotation count must match the algorithm's kNumSunSearchRotations");
 
 namespace {
 
@@ -36,6 +36,8 @@ SunSearchPointConfig configFromC(const RotationPropertiesArray4_c& rotationsIn,
 }  // namespace
 
 uint32_t SunSearchPointAlgorithm_getNumRotations(void) { return kNumSunSearchRotations; }
+
+uint32_t SunSearchPointAlgorithm_getMaxObservationThreshold(void) { return kMaxNumCssSensors; }
 
 bool SunSearchPointAlgorithm_validateConfig(const RotationPropertiesArray4_c* rotations,
                                             const Vector3f_c sHatBdyCmd,
@@ -93,6 +95,6 @@ SunSearchPointOutput_c SunSearchPointAlgorithm_update(SunSearchPointAlgorithmHan
     eigenVectorToCArray(out.sigma_BR, result.sigma_BR.data);
     eigenVectorToCArray(out.omega_BR_B, result.omega_BR_B.data);
     eigenVectorToCArray(out.omega_RN_B, result.omega_RN_B.data);
-    result.faultDetected = out.faultDetected;
+    result.sunNotFound = out.sunNotFound;
     return result;
 }
