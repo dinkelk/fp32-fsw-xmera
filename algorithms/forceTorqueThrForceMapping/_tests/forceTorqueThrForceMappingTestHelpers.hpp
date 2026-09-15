@@ -194,7 +194,7 @@ inline Eigen::Vector<float, kMaxThrusterCount> referenceUpdate(std::uint32_t num
             minKeptSv = sv(i);  // sv is sorted descending, so this ends on the smallest kept value
         }
     }
-    const Eigen::Matrix<double, kMaxThrusterCount, 1> thrForces =
+    Eigen::Matrix<double, kMaxThrusterCount, 1> thrForces =
         svd.matrixV().leftCols<6>() * invSv.asDiagonal() * svd.matrixU().transpose() * ft;
 
     // Error scale for the fp32-vs-fp64 comparison: cond * ||F_pre||_inf. The fp32 solver's relative
@@ -205,10 +205,45 @@ inline Eigen::Vector<float, kMaxThrusterCount> referenceUpdate(std::uint32_t num
         *absErrorScale = static_cast<float>(cond * preShiftMaxAbs);
     }
 
-    // min-shift over the active head only, matching the algorithm.
-    const double minForce = thrForces.head(numThrusters).minCoeff();
+    // Null-space shift, then clamp, as the algorithm does.
+    // Null space dimension is numThrusters - rank. With no dimension, there is no shift.
+    std::uint32_t rank = 0;
+    for (int k = 0; k < 6; ++k) {
+        if (sv(k) > tol) {
+            ++rank;
+        }
+    }
+    Eigen::Matrix<double, kMaxThrusterCount, 1> nullSpaceShift = Eigen::Matrix<double, kMaxThrusterCount, 1>::Zero();
+    if (rank < numThrusters) {
+        Eigen::Matrix<double, kMaxThrusterCount, 1> ones = Eigen::Matrix<double, kMaxThrusterCount, 1>::Zero();
+        ones.head(numThrusters).setOnes();
+        nullSpaceShift = ones;
+        for (int k = 0; k < 6; ++k) {
+            if (sv(k) > tol) {
+                const Eigen::Matrix<double, kMaxThrusterCount, 1> rowSpaceDirection = svd.matrixV().col(k);
+                nullSpaceShift -= rowSpaceDirection.dot(ones) * rowSpaceDirection;
+            }
+        }
+        if (numThrusters < kMaxThrusterCount) {
+            nullSpaceShift.tail(kMaxThrusterCount - numThrusters).setZero();
+        }
+    }
+
+    constexpr double kNullSpaceTol = 1e-6;   //!< [-] below this, 1 has no component in the null space
+    constexpr double kShiftReachTol = 1e-1;  //!< [-] below this fraction, the shift cannot lift the entry
+    const double shiftScale = nullSpaceShift.head(numThrusters).cwiseAbs().maxCoeff();
+    if (shiftScale > kNullSpaceTol) {
+        double step = 0.0;
+        for (std::uint32_t j = 0; j < numThrusters; ++j) {
+            if (nullSpaceShift(static_cast<int>(j)) > kShiftReachTol * shiftScale) {
+                step = std::max(step, -thrForces(static_cast<int>(j)) / nullSpaceShift(static_cast<int>(j)));
+            }
+        }
+        thrForces.head(numThrusters) += step * nullSpaceShift.head(numThrusters);
+    }
+
     for (std::uint32_t i = 0; i < numThrusters; ++i) {
-        result[static_cast<int>(i)] = static_cast<float>(thrForces(i) - minForce);
+        result[static_cast<int>(i)] = static_cast<float>(std::max(thrForces(static_cast<int>(i)), 0.0));
     }
     return result;
 }
@@ -293,24 +328,18 @@ inline void propertyNonNegativeForces(std::uint32_t numThrusters,
     }
 }
 
-// The minimum active thruster force is zero (post-shift property — the min element must be exactly
-// the subtracted value, leaving a zero).
-inline void propertyMinimumIsZero(std::uint32_t numThrusters,
-                                  std::vector<Eigen::Vector3f> positions,
-                                  std::vector<Eigen::Vector3f> directions,
-                                  const Eigen::Vector3f& CoM,
-                                  const Eigen::Vector3f& cmdTorque,
-                                  const Eigen::Vector3f& cmdForce) {
+// The minimum active thruster force is zero. This is true only on a balanced layout, where the shift
+// direction is the all-ones vector. An unbalanced layout keeps a minimum above zero.
+inline void propertyMinimumIsZeroForBalancedLayout(const Eigen::Vector3f& CoM,
+                                                   const Eigen::Vector3f& cmdTorque,
+                                                   const Eigen::Vector3f& cmdForce) {
+    constexpr std::uint32_t numThrusters = 8U;
     ThrusterArrayConfiguration config{};
-    if (!buildThrusterConfig(numThrusters, positions, directions, config)) {
+    if (!buildThrusterConfig(numThrusters, rcsPositions1(), rcsDirections1(), config)) {
         return;
     }
-    // create() rejects ill-conditioned or uncontrollable configs; skip the inputs it would reject.
-    const std::optional<ConfiguredMapping> configured = configureForControllableAxes(config, CoM);
-    if (!configured.has_value()) {
-        return;
-    }
-    const ForceTorqueThrForceMappingAlgorithm& alg = configured->algorithm;
+    const ForceTorqueThrForceMappingAlgorithm alg =
+        makeMappingAlgorithm(config, CoM, {true, true, true, false, true, true});
 
     const Eigen::Vector<float, kMaxThrusterCount> out = alg.update(cmdTorque, cmdForce);
 
