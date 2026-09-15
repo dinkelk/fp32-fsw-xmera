@@ -370,6 +370,14 @@ inline void searchConfigValidationChecks() {
     EXPECT_ANY_THROW((void)makeSearchConfig(
         makeValidRotations(), validSHat, 0.0F, Eigen::Vector3f{0.0F, 0.0F, std::numeric_limits<float>::quiet_NaN()}));
 
+    // observationThreshold must be a count the sensors can actually reach. Zero is allowed: it
+    // transitions to pointing as soon as the first rotation completes.
+    EXPECT_NO_THROW((void)makeSearchConfig(makeValidRotations(), validSHat, 0.0F, Eigen::Vector3f::Zero(), 0U));
+    EXPECT_NO_THROW(
+        (void)makeSearchConfig(makeValidRotations(), validSHat, 0.0F, Eigen::Vector3f::Zero(), kMaxNumCssSensors));
+    EXPECT_ANY_THROW(
+        (void)makeSearchConfig(makeValidRotations(), validSHat, 0.0F, Eigen::Vector3f::Zero(), kMaxNumCssSensors + 1U));
+
     // controlPeriod must be finite and > 0.
     EXPECT_ANY_THROW((void)makeSearchConfig(makeValidRotations(), validSHat, 0.0F, Eigen::Vector3f::Zero(), 4, 0.0F));
     EXPECT_ANY_THROW((void)makeSearchConfig(makeValidRotations(), validSHat, 0.0F, Eigen::Vector3f::Zero(), 4, -0.5F));

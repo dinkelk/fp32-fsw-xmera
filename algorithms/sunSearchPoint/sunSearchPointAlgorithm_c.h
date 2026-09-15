@@ -30,7 +30,7 @@ typedef struct {
     Vector3f_c sigma_BR;   /*!< attitude error (MRPs) of B relative to R */
     Vector3f_c omega_BR_B; /*!< [rad/s] body rate error of B relative to R in B frame */
     Vector3f_c omega_RN_B; /*!< [rad/s] reference frame rate of R relative to N in B frame */
-    bool faultDetected;    /*!< [-] true once the search fails to acquire the sun (forced to pointing) */
+    bool sunNotFound;      /*!< [-] true once the search fails to acquire the sun (forced to pointing) */
 } SunSearchPointOutput_c;
 
 /**
@@ -38,6 +38,12 @@ typedef struct {
  * @return The number of rotation slots in the sun-search sequence.
  */
 uint32_t SunSearchPointAlgorithm_getNumRotations(void);
+
+/**
+ * @brief Get the largest accepted observationThreshold for Ada validation.
+ * @return kMaxNumCssSensors, the CSS count a threshold can never usefully exceed.
+ */
+uint32_t SunSearchPointAlgorithm_getMaxObservationThreshold(void);
 
 /**
  * @brief Report whether a configuration would be accepted by create/setConfig.

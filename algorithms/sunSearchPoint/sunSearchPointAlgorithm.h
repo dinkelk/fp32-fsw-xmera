@@ -1,6 +1,7 @@
 #ifndef F32XMERA_SUN_SEARCH_POINT_ALGORITHM_H
 #define F32XMERA_SUN_SEARCH_POINT_ALGORITHM_H
 
+#include "msgPayloadDef/definitions.h"
 #include "sunSearchPointTypes.h"
 #include "utilities/fsw/freestandingInvalidArgument.h"
 #include "utilities/fsw/freestandingIsFinite.hpp"
@@ -27,7 +28,7 @@ struct SunSearchPointOutput {
     Eigen::Vector3f sigma_BR;    //!< attitude error (MRPs) of B relative to R
     Eigen::Vector3f omega_BR_B;  //!< [rad/s] body rate error of B relative to R in B frame
     Eigen::Vector3f omega_RN_B;  //!< [rad/s] reference frame rate of R relative to N in B frame
-    bool faultDetected{false};   //!< [-] true once the search fails to acquire the sun (forced to pointing)
+    bool sunNotFound{false};     //!< [-] true once the search fails to acquire the sun (forced to pointing)
 };
 
 /**
@@ -35,8 +36,9 @@ struct SunSearchPointOutput {
  *
  * Holds the sun-search rotation sequence and the pointing parameters. An instance can only exist if
  * every rotation has a finite, positive duration, a finite commanded rate, and a valid axis, if
- * sHatBdyCmd has unit norm (within 1e-3), if sunAxisSpinRate and omega_RN_B are finite, and if
- * controlPeriod is finite and positive. Construct via SunSearchPointConfig::create(...).
+ * sHatBdyCmd has unit norm (within 1e-3), if sunAxisSpinRate and omega_RN_B are finite, if
+ * observationThreshold is at most kMaxNumCssSensors, and if controlPeriod is finite and positive.
+ * Construct via SunSearchPointConfig::create(...).
  */
 class SunSearchPointConfig final {
    public:
@@ -67,6 +69,9 @@ class SunSearchPointConfig final {
         if (!isValidOmega_RN_B(omega_RN_B)) {
             FSW_THROW_INVALID_ARGUMENT("sunSearchPoint: omega_RN_B must be finite");
         }
+        if (!isValidObservationThreshold(observationThreshold)) {
+            FSW_THROW_INVALID_ARGUMENT("sunSearchPoint: observationThreshold must be <= kMaxNumCssSensors");
+        }
         if (!isValidControlPeriod(controlPeriod)) {
             FSW_THROW_INVALID_ARGUMENT("sunSearchPoint: controlPeriod must be finite and > 0");
         }
@@ -88,8 +93,12 @@ class SunSearchPointConfig final {
     static bool isValidControlPeriod(float controlPeriod) {
         return fsw::is_finite(controlPeriod) && controlPeriod > 0.0F;
     }
-    // No isValidObservationThreshold - every count is meaningful. Zero transitions to pointing as
-    // soon as the first rotation completes; a count the sensors cannot reach runs the full sequence.
+    // Zero is meaningful: it transitions to pointing as soon as the first rotation completes. A
+    // threshold above the sensor count is not, because it can never be met, so the sequence always
+    // elapses and the fault latches on every run whether or not the sun was there.
+    static bool isValidObservationThreshold(uint32_t observationThreshold) {
+        return observationThreshold <= kMaxNumCssSensors;
+    }
 
     const std::array<RotationProperties, kNumSunSearchRotations>& getRotations() const { return rotations; }
     const Eigen::Vector3f& getSHatBdyCmd() const { return sHatBdyCmd; }
