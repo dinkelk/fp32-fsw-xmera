@@ -167,7 +167,7 @@ def test_sun_search_point(show_plots, case):
 
     # The run never reaches the observation threshold, so the search fails and forces POINT,
     # latching the search-failure fault.
-    assert fault_out_msg_data_log.faultDetected[-1] == True
+    assert fault_out_msg_data_log.sunNotFound[-1] == True
 
     # Parameter round-trips (scalar attributes + SWIG rotation-config binding)
     np.testing.assert_allclose(sun_search_point.sunAxisSpinRate, sunAxisSpinRate, rtol=tolerance, atol=tolerance)
@@ -265,7 +265,7 @@ def test_search_then_point(show_plots):
     assert saw_point, "expected pointing-phase samples after the transition"
 
     # The sun was acquired (observations above threshold), so the search succeeded: no fault.
-    assert fault_out_msg_data_log.faultDetected[-1] == False
+    assert fault_out_msg_data_log.sunNotFound[-1] == False
 
 
 def test_reconfigure_applies_params(show_plots):

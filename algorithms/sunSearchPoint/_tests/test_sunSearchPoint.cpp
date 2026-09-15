@@ -318,7 +318,7 @@ TEST(SunSearchPointTest, NoTransitionDuringFirstRotation) {
     EXPECT_NEAR(out.omega_RN_B[0], 0.1F, 1e-6F);
     EXPECT_NEAR(out.omega_RN_B[1], 0.0F, 1e-6F);
     EXPECT_NEAR(out.omega_RN_B[2], 0.0F, 1e-6F);
-    EXPECT_FALSE(out.faultDetected);
+    EXPECT_FALSE(out.sunNotFound);
 }
 
 TEST(SunSearchPointTest, StaysSearchingBelowThreshold) {
@@ -362,7 +362,7 @@ TEST(SunSearchPointTest, ForcedTransitionAfterAllRotations) {
         EXPECT_NEAR(out.sigma_BR[i], reference.sigma_BR[i], 1e-5F);
     }
     EXPECT_NEAR(out.omega_RN_B.norm(), 0.0F, 1e-6F);
-    EXPECT_TRUE(out.faultDetected);  // search failed (sun never acquired) -> fault latched
+    EXPECT_TRUE(out.sunNotFound);  // search failed (sun never acquired) -> fault latched
 }
 
 TEST(SunSearchPointTest, TransitionsToPointAtThreshold) {
@@ -386,7 +386,7 @@ TEST(SunSearchPointTest, TransitionsToPointAtThreshold) {
             EXPECT_NEAR(out.sigma_BR[i], reference.sigma_BR[i], 1e-5F);
         }
         EXPECT_NEAR(out.omega_RN_B.norm(), 0.0F, 1e-6F);
-        EXPECT_FALSE(out.faultDetected);  // sun acquired -> healthy transition, no fault
+        EXPECT_FALSE(out.sunNotFound);  // sun acquired -> healthy transition, no fault
     }
 }
 
@@ -411,7 +411,7 @@ TEST(SunSearchPointTest, PointIsTerminalNoReturnToSearch) {
     for (int i = 0; i < 3; ++i) {
         EXPECT_NEAR(out.sigma_BR[i], reference.sigma_BR[i], 1e-5F);
     }
-    EXPECT_FALSE(out.faultDetected);  // entered POINT via sun acquisition, not search failure
+    EXPECT_FALSE(out.sunNotFound);  // entered POINT via sun acquisition, not search failure
 }
 
 TEST(SunSearchPointTest, PointResumesPointingWhenSunReturns) {
@@ -460,5 +460,5 @@ TEST(SunSearchPointTest, ForcedTransitionWithoutSunUsesFallbackRate) {
     EXPECT_NEAR(out.omega_RN_B[0], 0.0F, 1e-6F);
     EXPECT_NEAR(out.omega_RN_B[1], 0.0F, 1e-6F);
     EXPECT_NEAR(out.omega_RN_B[2], 0.1F, 1e-6F);  // fallback, not the 0.4 hold or zero
-    EXPECT_TRUE(out.faultDetected);               // search failed (threshold never met) -> fault latched
+    EXPECT_TRUE(out.sunNotFound);                 // search failed (threshold never met) -> fault latched
 }

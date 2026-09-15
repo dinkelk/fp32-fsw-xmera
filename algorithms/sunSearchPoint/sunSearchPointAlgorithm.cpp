@@ -73,7 +73,7 @@ SunSearchPointOutput SunSearchPointAlgorithm::update(const Eigen::Vector3f& rHat
 
     SunSearchPointOutput output = (this->phase == Phase::Pointing) ? this->computePointing(rHat_SB_B, omega_BN_B)
                                                                    : this->computeSearch(omega_BN_B);
-    output.faultDetected = this->searchFailed;
+    output.sunNotFound = this->searchFailed;
 
     // Advance the search timeline by one control period for the next update() call.
     this->elapsedTimeNs += this->controlPeriodNs;

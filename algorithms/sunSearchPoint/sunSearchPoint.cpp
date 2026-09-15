@@ -97,7 +97,7 @@ void SunSearchPoint::updateState(uint64_t callTime) {
 
     this->attGuidanceOutMsg.write(attGuidanceOutBuffer, moduleID, callTime);
 
-    const SunSearchPointFaultMsgPayload faultBuffer{output.faultDetected};
+    const SunSearchPointFaultMsgPayload faultBuffer{output.sunNotFound};
     this->sunSearchPointFaultOutMsg.write(faultBuffer, moduleID, callTime);
 }
 
