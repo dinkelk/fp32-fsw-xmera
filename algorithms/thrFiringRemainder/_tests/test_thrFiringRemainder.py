@@ -87,9 +87,11 @@ def test_thrFiringRemainderF32(show_plots, thrust_pulsing_regime):
 
     unit_test_sim.AddModelToTask(unit_task_name, module)
 
-    # Generate random thruster configuration
+    # Generate random thruster configuration. Every slot must be populated:
+    # the config validates all MAX_EFF_CNT maxThrust entries, not just the
+    # ones numThrusters reports.
     rng = np.random.default_rng(seed=42)
-    num_thrusters = rng.integers(1, MAX_EFF_CNT + 1)
+    num_thrusters = MAX_EFF_CNT
     max_thrust = 0.5
     thrusters = generate_random_thrusters(rng, num_thrusters, max_thrust)
     thr_config_msg = create_thruster_array_config_msg(thrusters)
