@@ -52,7 +52,7 @@ The following table lists all the module input and output messages.
       - output message of attitude tracking errors and reference frame states
     * - sunSearchPointFaultOutMsg
       - :ref:`SunSearchPointFaultMsgPayload`
-      - output message whose ``faultDetected`` flag latches ``true`` if the search sequence elapses
+      - output message whose ``sunNotFound`` flag latches ``true`` if the search sequence elapses
         without acquiring the sun (the forced transition to pointing); re-armed only by ``reset()``
 
 Module Parameters
@@ -83,10 +83,11 @@ Module Parameters
       - zero
       - Body-fixed fallback rate commanded in the pointing phase when no sun direction is available
     * - observationThreshold
-      - int
+      - uint32_t
       - [-]
       - 4
-      - CSS observation count at or above which the sun is considered acquired
+      - CSS observation count at or above which the sun is considered acquired. Must be at most
+        ``MAX_NUM_CSS_SENSORS``; a larger threshold can never be met
     * - controlPeriod (required)
       - float
       - [s]
@@ -108,6 +109,11 @@ Module Assumptions and Limitations
 - The sun-pointing condition is under-determined (2 DOF): the rotation about :math:`\mathbf s` is arbitrary.
 - Each rotation's duration must be finite and strictly positive; the commanded rate must be finite
   (any sign). Invalid sequences are rejected when the configuration is installed.
+- ``observationThreshold`` must be at most ``MAX_NUM_CSS_SENSORS``. The observation count comes from
+  ``FilterResidualsMsgF32Payload.sizeOfObservations``, which cannot exceed the sensor count, so a
+  larger threshold is never met: the search always runs the full sequence and latches the fault
+  whether or not the sun was there. Zero is allowed and transitions to pointing as soon as the first
+  rotation completes.
 - The search timeline is advanced by one ``controlPeriod`` per update rather than from an absolute
   clock, so ``controlPeriod`` must equal the rate at which the module is scheduled; a mismatch makes
   the rotation durations elapse faster or slower than wall-clock time.
@@ -155,7 +161,7 @@ enters the SEARCH phase. Each ``updateState()`` advances the counter by one ``co
 where :math:`N` is the number of rotations. POINT is terminal. When the transition is *forced* by
 the second condition alone — the full sequence elapses (:math:`t_e \geq T_{N-1}`) without the
 observation count ever reaching the threshold — the search has failed to acquire the sun. In that
-case the module latches a fault: ``sunSearchPointFaultOutMsg.faultDetected`` is set ``true`` and stays
+case the module latches a fault: ``sunSearchPointFaultOutMsg.sunNotFound`` is set ``true`` and stays
 ``true`` for the rest of the run (even if the sun is later seen), cleared only by ``reset()``.
 
 Search Phase

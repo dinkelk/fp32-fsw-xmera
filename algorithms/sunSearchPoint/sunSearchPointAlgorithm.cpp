@@ -54,7 +54,7 @@ void SunSearchPointAlgorithm::reInitialize() {
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 SunSearchPointOutput SunSearchPointAlgorithm::update(const Eigen::Vector3f& rHat_SB_B,
                                                      const Eigen::Vector3f& omega_BN_B,
-                                                     const int numCssViewingSun) {
+                                                     const uint32_t numCssViewingSun) {
     // Evaluate the one-way SEARCH -> POINT transition. The first rotation always runs to
     // completion; after that, a sufficient observation count transitions to pointing, and the
     // full sequence elapsing forces the transition regardless of observations.
@@ -73,7 +73,7 @@ SunSearchPointOutput SunSearchPointAlgorithm::update(const Eigen::Vector3f& rHat
 
     SunSearchPointOutput output = (this->phase == Phase::Pointing) ? this->computePointing(rHat_SB_B, omega_BN_B)
                                                                    : this->computeSearch(omega_BN_B);
-    output.faultDetected = this->searchFailed;
+    output.sunNotFound = this->searchFailed;
 
     // Advance the search timeline by one control period for the next update() call.
     this->elapsedTimeNs += this->controlPeriodNs;
