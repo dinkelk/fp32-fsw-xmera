@@ -23,31 +23,15 @@ void ThrFiringSchmitt::reset(uint64_t callTime) {
         throw std::invalid_argument("thrFiringSchmitt.thrForceInMsg wasn't connected.");
     }
 
-    /*! - read in the thruster configuration message and map to the validated thruster array */
-    const auto [numThrusters, thrusters] = this->thrConfInMsg();
-    ThrFiringSchmittThrusterArray thrusterArray{};
-    thrusterArray.numThrusters = numThrusters;
-    for (std::uint32_t i = 0U; i < numThrusters && i < kMaxThrusterCount; ++i) {
-        thrusterArray.maxThrust.at(i) = thrusters[i].maxThrust;
-    }
-
-    const ThrFiringSchmittControlParameters controlParameters{this->levelOn,
-                                                              this->levelOff,
-                                                              this->thrMinFireTime,
-                                                              this->controlPeriod,
-                                                              this->onTimeSaturationFactor,
-                                                              this->thrustPulsingRegime};
-
-    const auto config = ThrFiringSchmittConfig::create(thrusterArray, controlParameters);
-    this->algorithm = std::make_unique<ThrFiringSchmittAlgorithm>(config);
+    /*! - read in the thruster configuration message and build the validated configuration */
+    this->algorithm = std::make_unique<ThrFiringSchmittAlgorithm>(this->toConfig());
 }
 
 ThrFiringSchmittConfig ThrFiringSchmitt::toConfig() {
-    const auto [numThrusters, thrusters] = this->thrConfInMsg();
+    const auto thrConfig = this->thrConfInMsg();
     ThrFiringSchmittThrusterArray thrusterArray{};
-    thrusterArray.numThrusters = numThrusters;
-    for (std::uint32_t i = 0U; i < numThrusters && i < kMaxThrusterCount; ++i) {
-        thrusterArray.maxThrust.at(i) = thrusters[i].maxThrust;
+    for (std::uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
+        thrusterArray.maxThrust.at(i) = thrConfig.thrusters[i].maxThrust;
     }
 
     const ThrFiringSchmittControlParameters controlParameters{this->levelOn,

@@ -6,16 +6,13 @@
 #include <algorithm>
 
 namespace {
-ThrFiringRemainderConfig configFromC(const uint32_t numThrusters,
-                                     float maxThrust[MAX_EFF_CNT],
+ThrFiringRemainderConfig configFromC(float maxThrust[MAX_EFF_CNT],
                                      const float thrMinFireTime,
                                      const float controlPeriod,
                                      const float onTimeSaturationFactor,
                                      const ThrFiringRemainderPulsingRegime pulsingRegime) {
     ThrFiringRemainderThrusterArray thrusterArray{};
-    thrusterArray.numThrusters = numThrusters;
-    const uint32_t copyCount = std::min(numThrusters, kMaxThrusterCount);
-    std::copy(maxThrust, maxThrust + copyCount, thrusterArray.maxThrust.begin());
+    std::copy(maxThrust, maxThrust + kMaxThrusterCount, thrusterArray.maxThrust.begin());
 
     const ThrFiringControlParameters params{
         thrMinFireTime, controlPeriod, onTimeSaturationFactor, static_cast<ThrustPulsingRegime>(pulsingRegime)};
@@ -26,8 +23,7 @@ ThrFiringRemainderConfig configFromC(const uint32_t numThrusters,
 
 uint32_t ThrFiringRemainderAlgorithm_getMaxThrusterCount(void) { return kMaxThrusterCount; }
 
-bool ThrFiringRemainderAlgorithm_validateConfig(const uint32_t numThrusters,
-                                                float maxThrust[MAX_EFF_CNT],
+bool ThrFiringRemainderAlgorithm_validateConfig(float maxThrust[MAX_EFF_CNT],
                                                 const float thrMinFireTime,
                                                 const float controlPeriod,
                                                 const float onTimeSaturationFactor,
@@ -35,8 +31,7 @@ bool ThrFiringRemainderAlgorithm_validateConfig(const uint32_t numThrusters,
     // Attempt to build the config through the real create path; success means valid,
     // a throw means invalid. Reusing configFromC keeps validation from drifting.
     try {
-        (void)configFromC(
-            numThrusters, maxThrust, thrMinFireTime, controlPeriod, onTimeSaturationFactor, pulsingRegime);
+        (void)configFromC(maxThrust, thrMinFireTime, controlPeriod, onTimeSaturationFactor, pulsingRegime);
         return true;
     } catch (const fsw::invalid_argument&) {
         return false;
@@ -44,14 +39,13 @@ bool ThrFiringRemainderAlgorithm_validateConfig(const uint32_t numThrusters,
 }
 
 ThrFiringRemainderAlgorithmHandle* ThrFiringRemainderAlgorithm_create(
-    const uint32_t numThrusters,
     float maxThrust[MAX_EFF_CNT],
     const float thrMinFireTime,
     const float controlPeriod,
     const float onTimeSaturationFactor,
     const ThrFiringRemainderPulsingRegime pulsingRegime) {
     return fsw::createHandle<::ThrFiringRemainderAlgorithm, ThrFiringRemainderAlgorithmHandle>(
-        configFromC(numThrusters, maxThrust, thrMinFireTime, controlPeriod, onTimeSaturationFactor, pulsingRegime));
+        configFromC(maxThrust, thrMinFireTime, controlPeriod, onTimeSaturationFactor, pulsingRegime));
 }
 
 void ThrFiringRemainderAlgorithm_destroy(ThrFiringRemainderAlgorithmHandle* self) {
@@ -59,14 +53,13 @@ void ThrFiringRemainderAlgorithm_destroy(ThrFiringRemainderAlgorithmHandle* self
 }
 
 void ThrFiringRemainderAlgorithm_setConfig(ThrFiringRemainderAlgorithmHandle* self,
-                                           const uint32_t numThrusters,
                                            float maxThrust[MAX_EFF_CNT],
                                            const float thrMinFireTime,
                                            const float controlPeriod,
                                            const float onTimeSaturationFactor,
                                            const ThrFiringRemainderPulsingRegime pulsingRegime) {
     fsw::fromHandle<::ThrFiringRemainderAlgorithm>(self)->setConfig(
-        configFromC(numThrusters, maxThrust, thrMinFireTime, controlPeriod, onTimeSaturationFactor, pulsingRegime));
+        configFromC(maxThrust, thrMinFireTime, controlPeriod, onTimeSaturationFactor, pulsingRegime));
 }
 
 void ThrFiringRemainderAlgorithm_reInitialize(ThrFiringRemainderAlgorithmHandle* self) {

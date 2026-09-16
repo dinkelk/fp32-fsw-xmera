@@ -21,7 +21,6 @@ uint32_t ThrFiringRemainderAlgorithm_getMaxThrusterCount(void);
 
 /**
  * @brief Report whether a configuration would be accepted by create/setConfig.
- * @param numThrusters           [-] number of thrusters on the vehicle.
  * @param maxThrust              [N] per-thruster maximum thrust.
  * @param thrMinFireTime         [s] minimum commandable thruster fire time.
  * @param controlPeriod          [s] control period the force command applies over.
@@ -32,8 +31,7 @@ uint32_t ThrFiringRemainderAlgorithm_getMaxThrusterCount(void);
  * @note The accepted value ranges are defined by ThrFiringRemainderConfig::create; this predicate
  *       reports whether a candidate set would be accepted, without throwing.
  */
-bool ThrFiringRemainderAlgorithm_validateConfig(uint32_t numThrusters,
-                                                float maxThrust[MAX_EFF_CNT],
+bool ThrFiringRemainderAlgorithm_validateConfig(float maxThrust[MAX_EFF_CNT],
                                                 float thrMinFireTime,
                                                 float controlPeriod,
                                                 float onTimeSaturationFactor,
@@ -41,7 +39,6 @@ bool ThrFiringRemainderAlgorithm_validateConfig(uint32_t numThrusters,
 
 /**
  * @brief Construct a new ThrFiringRemainderAlgorithm instance from the supplied configuration.
- * @param numThrusters           [-] number of thrusters on the vehicle.
  * @param maxThrust              [N] per-thruster maximum thrust.
  * @param thrMinFireTime         [s] minimum commandable thruster fire time.
  * @param controlPeriod          [s] control period the force command applies over.
@@ -49,8 +46,7 @@ bool ThrFiringRemainderAlgorithm_validateConfig(uint32_t numThrusters,
  * @param pulsingRegime          [-] on-pulsing or off-pulsing.
  * @return Pointer to a new ThrFiringRemainderAlgorithm (must be destroyed). Validated; throws on invalid input.
  */
-ThrFiringRemainderAlgorithmHandle* ThrFiringRemainderAlgorithm_create(uint32_t numThrusters,
-                                                                      float maxThrust[MAX_EFF_CNT],
+ThrFiringRemainderAlgorithmHandle* ThrFiringRemainderAlgorithm_create(float maxThrust[MAX_EFF_CNT],
                                                                       float thrMinFireTime,
                                                                       float controlPeriod,
                                                                       float onTimeSaturationFactor,
@@ -65,7 +61,6 @@ void ThrFiringRemainderAlgorithm_destroy(ThrFiringRemainderAlgorithmHandle* self
 /**
  * @brief Replace the algorithm's configuration at runtime. The pulse remainder state is preserved.
  * @param self                   Pointer to the instance.
- * @param numThrusters           [-] number of thrusters on the vehicle.
  * @param maxThrust              [N] per-thruster maximum thrust.
  * @param thrMinFireTime         [s] minimum commandable thruster fire time.
  * @param controlPeriod          [s] control period the force command applies over.
@@ -74,7 +69,6 @@ void ThrFiringRemainderAlgorithm_destroy(ThrFiringRemainderAlgorithmHandle* self
  * Validated; throws on invalid input.
  */
 void ThrFiringRemainderAlgorithm_setConfig(ThrFiringRemainderAlgorithmHandle* self,
-                                           uint32_t numThrusters,
                                            float maxThrust[MAX_EFF_CNT],
                                            float thrMinFireTime,
                                            float controlPeriod,

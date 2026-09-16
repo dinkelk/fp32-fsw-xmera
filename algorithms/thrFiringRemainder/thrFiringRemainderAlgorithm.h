@@ -24,7 +24,6 @@ struct ThrusterOnTimeCmd {
 
 /*! @brief Validated thruster array: per-thruster maximum thrust. */
 struct ThrFiringRemainderThrusterArray {
-    uint32_t numThrusters{};                           //!< [-] number of thrusters on the vehicle
     std::array<float, kMaxThrusterCount> maxThrust{};  //!< [N] per-thruster maximum thrust
 };
 
@@ -40,8 +39,8 @@ struct ThrFiringControlParameters {
  * @brief Validated configuration for the thruster firing remainder algorithm.
  *
  * Bundles the thruster array (per-thruster maximum thrust) with the firing control parameters. An instance can
- * only exist if: the thruster count does not exceed the compile-time maximum and every maximum thrust is finite
- * and non-negative; the minimum fire time is finite and non-negative; the control period is finite and positive;
+ * only exist if: every maximum thrust is finite and positive; the minimum fire time is finite and non-negative;
+ * the control period is finite and positive;
  * the on-time saturation factor is finite and at least one; and the pulsing regime is a defined enumerator.
  * Construct via ThrFiringRemainderConfig::create(...).
  */
@@ -50,9 +49,7 @@ class ThrFiringRemainderConfig final {
     static ThrFiringRemainderConfig create(const ThrFiringRemainderThrusterArray& thrusterArray,
                                            const ThrFiringControlParameters& controlParameters) {
         if (!isValidThrusterArray(thrusterArray)) {
-            FSW_THROW_INVALID_ARGUMENT(
-                "thrFiringRemainder: numThrusters must not exceed the compile-time maximum and each thruster's "
-                "maxThrust must be finite and >= 0.");
+            FSW_THROW_INVALID_ARGUMENT("thrFiringRemainder: each thruster's maxThrust must be finite and > 0.");
         }
         if (!isValidThrMinFireTime(controlParameters.thrMinFireTime)) {
             FSW_THROW_INVALID_ARGUMENT("thrFiringRemainder: thrMinFireTime must be finite and >= 0.");
@@ -70,11 +67,8 @@ class ThrFiringRemainderConfig final {
     }
 
     static bool isValidThrusterArray(const ThrFiringRemainderThrusterArray& thrusterArray) {
-        if (thrusterArray.numThrusters > kMaxThrusterCount) {
-            return false;
-        }
-        for (uint32_t i = 0U; i < thrusterArray.numThrusters; ++i) {
-            if (!fsw::is_finite(thrusterArray.maxThrust.at(i)) || thrusterArray.maxThrust.at(i) < 0.0F) {
+        for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
+            if (!fsw::is_finite(thrusterArray.maxThrust.at(i)) || thrusterArray.maxThrust.at(i) <= 0.0F) {
                 return false;
             }
         }

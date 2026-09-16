@@ -36,8 +36,8 @@ Module inputs:
       - Description
     * - thrConfInMsg
       - :ref:`THRArrayConfigMsgF32Payload`
-      - Read in ``reset()``. Contains ``numThrusters`` and per-thruster max thrust. Only ``numThrusters`` and
-        ``maxThrust`` are consumed; each max thrust must be finite and :math:`\ge 0`.
+      - Read in ``reset()``. Supplies the per-thruster max thrust for all ``MAX_EFF_CNT`` thrusters. Only
+        ``maxThrust`` is consumed; each max thrust must be finite and :math:`> 0`.
     * - thrForceInMsg
       - :ref:`THRArrayCmdForceMsgF32Payload`
       - Read every ``updateState()``. Provides commanded forces :math:`F_i`. Values may be negative in OFF_PULSING
@@ -81,12 +81,9 @@ Validated configuration (``ThrFiringRemainderConfig``) is immutable and is const
     * - Parameter
       - Valid range
       - Description
-    * - ``thrusterArray.numThrusters``
-      - :math:`\le` 36
-      - Number of thrusters on the vehicle (compile-time maximum ``kMaxThrusterCount``).
     * - ``thrusterArray.maxThrust[i]``
-      - finite, :math:`\ge 0`
-      - Per-thruster maximum thrust [N].
+      - finite, :math:`> 0`
+      - Per-thruster maximum thrust [N], for every one of the ``kMaxThrusterCount`` thrusters.
     * - ``controlParameters.thrMinFireTime``
       - finite, :math:`\ge 0`
       - Minimum commandable thruster fire time [s].

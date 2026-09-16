@@ -1,35 +1,68 @@
 #include "thrFiringSchmittAlgorithm_c.h"
 #include "msgPayloadDef/definitions.h"
 #include "thrFiringSchmittAlgorithm.h"
+#include "utilities/fsw/freestandingInvalidArgument.h"
 #include "utilities/fsw/opaqueHandle.h"
 
 #include <algorithm>
 
 namespace {
-ThrFiringSchmittConfig toConfig(const ThrFiringSchmittConfig_c* config) {
+// Reassemble the flattened C arguments into the C++ configuration structs. The flat argument
+// list is the shape of the extern "C" boundary only; everything behind this helper is struct
+// based, and ThrFiringSchmittConfig::create remains the single validation authority.
+ThrFiringSchmittConfig configFromC(const float maxThrust[MAX_EFF_CNT],
+                                   const float levelOn,
+                                   const float levelOff,
+                                   const float thrMinFireTime,
+                                   const float controlPeriod,
+                                   const float onTimeSaturationFactor,
+                                   const ThrFiringSchmittPulsingRegime pulsingRegime) {
     ThrFiringSchmittThrusterArray thrusterArray{};
-    thrusterArray.numThrusters = config->thrusterArray.numThrusters;
-    const uint32_t copyCount = std::min(thrusterArray.numThrusters, kMaxThrusterCount);
-    for (uint32_t i = 0U; i < copyCount; ++i) {
-        thrusterArray.maxThrust.at(i) = config->thrusterArray.maxThrust[i];
+    for (uint32_t i = 0U; i < kMaxThrusterCount; ++i) {
+        thrusterArray.maxThrust.at(i) = maxThrust[i];
     }
 
-    const ThrFiringSchmittControlParameters params{
-        config->controlParameters.levelOn,
-        config->controlParameters.levelOff,
-        config->controlParameters.thrMinFireTime,
-        config->controlParameters.controlPeriod,
-        config->controlParameters.onTimeSaturationFactor,
-        static_cast<ThrustPulsingRegime>(config->controlParameters.pulsingRegime)};
+    const ThrFiringSchmittControlParameters controlParameters{levelOn,
+                                                              levelOff,
+                                                              thrMinFireTime,
+                                                              controlPeriod,
+                                                              onTimeSaturationFactor,
+                                                              static_cast<ThrustPulsingRegime>(pulsingRegime)};
 
-    return ThrFiringSchmittConfig::create(thrusterArray, params);
+    return ThrFiringSchmittConfig::create(thrusterArray, controlParameters);
 }
 }  // namespace
 
 uint32_t ThrFiringSchmittAlgorithm_getMaxThrusterCount(void) { return kMaxThrusterCount; }
 
-ThrFiringSchmittAlgorithmHandle* ThrFiringSchmittAlgorithm_create(const ThrFiringSchmittConfig_c* config) {
-    return fsw::createHandle<::ThrFiringSchmittAlgorithm, ThrFiringSchmittAlgorithmHandle>(toConfig(config));
+bool ThrFiringSchmittAlgorithm_validateConfig(float maxThrust[MAX_EFF_CNT],
+                                              const float levelOn,
+                                              const float levelOff,
+                                              const float thrMinFireTime,
+                                              const float controlPeriod,
+                                              const float onTimeSaturationFactor,
+                                              const ThrFiringSchmittPulsingRegime pulsingRegime) {
+    // Attempt to build the config through the real create path (configFromC ->
+    // ThrFiringSchmittConfig::create): success means valid, a throw means invalid.
+    // Reusing create means this validation can never drift from the rules it enforces.
+    try {
+        (void)configFromC(
+            maxThrust, levelOn, levelOff, thrMinFireTime, controlPeriod, onTimeSaturationFactor, pulsingRegime);
+        return true;
+    } catch (const fsw::invalid_argument&) {
+        return false;
+    }
+}
+
+ThrFiringSchmittAlgorithmHandle* ThrFiringSchmittAlgorithm_create(float maxThrust[MAX_EFF_CNT],
+                                                                  const float levelOn,
+                                                                  const float levelOff,
+                                                                  const float thrMinFireTime,
+                                                                  const float controlPeriod,
+                                                                  const float onTimeSaturationFactor,
+                                                                  const ThrFiringSchmittPulsingRegime pulsingRegime) {
+    return fsw::createHandle<::ThrFiringSchmittAlgorithm, ThrFiringSchmittAlgorithmHandle>(configFromC(
+        maxThrust, levelOn, levelOff, thrMinFireTime, controlPeriod, onTimeSaturationFactor, pulsingRegime));
 }
 
 void ThrFiringSchmittAlgorithm_destroy(ThrFiringSchmittAlgorithmHandle* self) {
@@ -37,8 +70,15 @@ void ThrFiringSchmittAlgorithm_destroy(ThrFiringSchmittAlgorithmHandle* self) {
 }
 
 void ThrFiringSchmittAlgorithm_setConfig(ThrFiringSchmittAlgorithmHandle* self,
-                                         const ThrFiringSchmittConfig_c* config) {
-    fsw::fromHandle<::ThrFiringSchmittAlgorithm>(self)->setConfig(toConfig(config));
+                                         float maxThrust[MAX_EFF_CNT],
+                                         const float levelOn,
+                                         const float levelOff,
+                                         const float thrMinFireTime,
+                                         const float controlPeriod,
+                                         const float onTimeSaturationFactor,
+                                         const ThrFiringSchmittPulsingRegime pulsingRegime) {
+    fsw::fromHandle<::ThrFiringSchmittAlgorithm>(self)->setConfig(configFromC(
+        maxThrust, levelOn, levelOff, thrMinFireTime, controlPeriod, onTimeSaturationFactor, pulsingRegime));
 }
 
 void ThrFiringSchmittAlgorithm_reInitialize(ThrFiringSchmittAlgorithmHandle* self) {
