@@ -138,17 +138,21 @@ inline std::optional<ConfiguredMapping> configureForControllableAxes(const Thrus
     return ConfiguredMapping{.algorithm = makeMappingAlgorithm(config, CoM, axes), .axes = axes};
 }
 
-// Independent truth implementation of update(). Mirrors the algorithm's truncated-SVD pseudo-inverse
-// in fp64 so numeric disagreement reflects real fp32 round-off rather than algorithmic divergence.
-// Two details must match the algorithm exactly:
-//   1. DG has the same shape (6 × kMaxThrusterCount with trailing zero columns), so the SVD's left
-//      singular vectors and the kept singular values are computed on an identical operator.
-//   2. The truncation cutoff uses fp32 epsilon scaled by max(6, kMaxThrusterCount) — the algorithm's
-//      noise floor — instead of fp64 epsilon. Otherwise the reference keeps singular values in the
-//      gap [eps_d, eps_f] that the algorithm correctly drops as fp32 noise, and 1/sv blows up.
-//   3. The rows of the axes outside `axes` are zeroed, as the algorithm zeroes them, so both solve the
-//      same reduced problem.
-// Assumes `directions` are already unit vectors (call buildThrusterConfig first if needed).
+// Independent implementation of update(), used as the truth value. It uses fp32, the same precision as
+// the algorithm. An fp64 reference does not work here. The step divides by an entry of the shift
+// direction, so the choice of entry changes with the precision. For a command the array cannot achieve,
+// fp32 and fp64 thus clamp different entries. Each result is non-negative and valid, but the two are not
+// equal. At equal precision, the comparison shows a difference in the implementation, and not a
+// difference in the arithmetic.
+//
+// Three details must agree with the algorithm:
+//   1. DG has the same shape (6 x kMaxThrusterCount, with zero columns at the end). The left singular
+//      vectors and the kept singular values thus come from the same operator.
+//   2. The reference sets the rows of the axes outside `axes` to zero, as the algorithm does. Both then
+//      solve the same reduced problem.
+//   3. The reference normalizes the directions again, as the algorithm normalizes its stored unit
+//      vectors. Both then build DG from the same columns.
+// The `directions` must be unit vectors already. Call buildThrusterConfig first if necessary.
 inline Eigen::Vector<float, kMaxThrusterCount> referenceUpdate(std::uint32_t numThrusters,
                                                                const std::vector<Eigen::Vector3f>& positions,
                                                                const std::vector<Eigen::Vector3f>& directions,
@@ -162,13 +166,11 @@ inline Eigen::Vector<float, kMaxThrusterCount> referenceUpdate(std::uint32_t num
         return result;
     }
 
-    Eigen::Matrix<double, 6, kMaxThrusterCount> DG = Eigen::Matrix<double, 6, kMaxThrusterCount>::Zero();
+    Eigen::Matrix<float, 6, kMaxThrusterCount> DG = Eigen::Matrix<float, 6, kMaxThrusterCount>::Zero();
     for (std::uint32_t i = 0; i < numThrusters; ++i) {
-        const Eigen::Vector3d r = positions[i].cast<double>();
-        const Eigen::Vector3d g = directions[i].cast<double>();
-        const Eigen::Vector3d arm = r - CoM_B.cast<double>();
-        const Eigen::Vector3d cross = arm.cross(g);
-        DG.col(static_cast<int>(i)).head<3>() = cross;
+        const Eigen::Vector3f g = directions[i].normalized();
+        const Eigen::Vector3f arm = positions[i] - CoM_B;
+        DG.col(static_cast<int>(i)).head<3>() = arm.cross(g);
         DG.col(static_cast<int>(i)).tail<3>() = g;
     }
     for (int axis = 0; axis < 6; ++axis) {
@@ -177,50 +179,44 @@ inline Eigen::Vector<float, kMaxThrusterCount> referenceUpdate(std::uint32_t num
         }
     }
 
-    Eigen::Matrix<double, 6, 1> ft;
-    ft << cmdTorque_B.cast<double>(), cmdForce_B.cast<double>();
+    Eigen::Vector<float, 6> ft;
+    ft << cmdTorque_B, cmdForce_B;
 
-    Eigen::JacobiSVD<Eigen::Matrix<double, 6, kMaxThrusterCount>> svd(DG, Eigen::ComputeFullU | Eigen::ComputeFullV);
-    const Eigen::Matrix<double, 6, 1> sv = svd.singularValues();
+    const Eigen::JacobiSVD<Eigen::Matrix<float, 6, kMaxThrusterCount>> svd(DG,
+                                                                           Eigen::ComputeFullU | Eigen::ComputeFullV);
+    const Eigen::Vector<float, 6> sv = svd.singularValues();
     constexpr int kMaxDim = (6 > kMaxThrusterCount) ? 6 : kMaxThrusterCount;
-    const double tol =
-        sv(0) * static_cast<double>(std::numeric_limits<float>::epsilon()) * static_cast<double>(kMaxDim);
+    const float tol = sv(0) * std::numeric_limits<float>::epsilon() * static_cast<float>(kMaxDim);
 
-    Eigen::Matrix<double, 6, 1> invSv = Eigen::Matrix<double, 6, 1>::Zero();
-    double minKeptSv = sv(0);
+    Eigen::Vector<float, 6> invSv = Eigen::Vector<float, 6>::Zero();
+    float minKeptSv = sv(0);
+    std::uint32_t rank = 0;
     for (int i = 0; i < 6; ++i) {
         if (sv(i) > tol) {
-            invSv(i) = 1.0 / sv(i);
+            invSv(i) = 1.0F / sv(i);
             minKeptSv = sv(i);  // sv is sorted descending, so this ends on the smallest kept value
-        }
-    }
-    Eigen::Matrix<double, kMaxThrusterCount, 1> thrForces =
-        svd.matrixV().leftCols<6>() * invSv.asDiagonal() * svd.matrixU().transpose() * ft;
-
-    // Error scale for the fp32-vs-fp64 comparison: cond * ||F_pre||_inf. The fp32 solver's relative
-    // error ~eps*cond makes the absolute per-entry error ~eps*cond*||F_pre||_inf.
-    if (absErrorScale != nullptr) {
-        const double cond = sv(0) / minKeptSv;
-        const double preShiftMaxAbs = thrForces.head(numThrusters).cwiseAbs().maxCoeff();
-        *absErrorScale = static_cast<float>(cond * preShiftMaxAbs);
-    }
-
-    // Null-space shift, then clamp, as the algorithm does.
-    // Null space dimension is numThrusters - rank. With no dimension, there is no shift.
-    std::uint32_t rank = 0;
-    for (int k = 0; k < 6; ++k) {
-        if (sv(k) > tol) {
             ++rank;
         }
     }
-    Eigen::Matrix<double, kMaxThrusterCount, 1> nullSpaceShift = Eigen::Matrix<double, kMaxThrusterCount, 1>::Zero();
+    Eigen::Vector<float, kMaxThrusterCount> thrForces =
+        svd.matrixV().leftCols<6>() * invSv.asDiagonal() * svd.matrixU().transpose() * ft;
+
+    // Error scale for the comparison: cond * ||F_pre||_inf. Both sides use fp32, but the order of the
+    // operations differs, so the residual still increases with the condition number.
+    if (absErrorScale != nullptr) {
+        const float cond = sv(0) / minKeptSv;
+        *absErrorScale = cond * thrForces.head(numThrusters).cwiseAbs().maxCoeff();
+    }
+
+    // Null space dimension is numThrusters - rank. With no dimension, there is no shift.
+    Eigen::Vector<float, kMaxThrusterCount> nullSpaceShift{Eigen::Vector<float, kMaxThrusterCount>::Zero()};
     if (rank < numThrusters) {
-        Eigen::Matrix<double, kMaxThrusterCount, 1> ones = Eigen::Matrix<double, kMaxThrusterCount, 1>::Zero();
+        Eigen::Vector<float, kMaxThrusterCount> ones{Eigen::Vector<float, kMaxThrusterCount>::Zero()};
         ones.head(numThrusters).setOnes();
         nullSpaceShift = ones;
         for (int k = 0; k < 6; ++k) {
             if (sv(k) > tol) {
-                const Eigen::Matrix<double, kMaxThrusterCount, 1> rowSpaceDirection = svd.matrixV().col(k);
+                const Eigen::Vector<float, kMaxThrusterCount> rowSpaceDirection = svd.matrixV().col(k);
                 nullSpaceShift -= rowSpaceDirection.dot(ones) * rowSpaceDirection;
             }
         }
@@ -229,21 +225,21 @@ inline Eigen::Vector<float, kMaxThrusterCount> referenceUpdate(std::uint32_t num
         }
     }
 
-    constexpr double kNullSpaceTol = 1e-6;   //!< [-] below this, 1 has no component in the null space
-    constexpr double kShiftReachTol = 1e-1;  //!< [-] below this fraction, the shift cannot lift the entry
-    const double shiftScale = nullSpaceShift.head(numThrusters).cwiseAbs().maxCoeff();
+    constexpr float kNullSpaceTol = 1e-6F;
+    constexpr float kShiftReachTol = 1e-1F;
+    const float shiftScale = nullSpaceShift.head(numThrusters).cwiseAbs().maxCoeff();
     if (shiftScale > kNullSpaceTol) {
-        double step = 0.0;
+        float step = 0.0F;
         for (std::uint32_t j = 0; j < numThrusters; ++j) {
             if (nullSpaceShift(static_cast<int>(j)) > kShiftReachTol * shiftScale) {
-                step = std::max(step, -thrForces(static_cast<int>(j)) / nullSpaceShift(static_cast<int>(j)));
+                step = fmaxf(step, -thrForces(static_cast<int>(j)) / nullSpaceShift(static_cast<int>(j)));
             }
         }
         thrForces.head(numThrusters) += step * nullSpaceShift.head(numThrusters);
     }
 
     for (std::uint32_t i = 0; i < numThrusters; ++i) {
-        result[static_cast<int>(i)] = static_cast<float>(std::max(thrForces(static_cast<int>(i)), 0.0));
+        result[static_cast<int>(i)] = fmaxf(thrForces(static_cast<int>(i)), 0.0F);
     }
     return result;
 }
