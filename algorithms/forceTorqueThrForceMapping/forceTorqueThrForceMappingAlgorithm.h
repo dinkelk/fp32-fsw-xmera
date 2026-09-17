@@ -4,6 +4,7 @@
 #include "forceTorqueThrForceMappingTypes.h"
 
 #include "msgPayloadDef/definitions.h"
+#include "utilities/fsw/deviceAvailability.h"
 #include "utilities/fsw/freestandingInvalidArgument.h"
 
 #include <Eigen/Core>
@@ -22,6 +23,8 @@ struct ThrusterArrayConfiguration {
     std::uint32_t numThrusters{};  //!< [-] number of thrusters
     std::array<ThrusterConfiguration, kMaxThrusterCount>
         thrusters{};  //!< [-] array of thruster configuration information
+    //!< [-] state of each thruster; an unavailable thruster takes no part in the mapping
+    std::array<fsw::DeviceAvailability, kMaxThrusterCount> thrusterAvailability{};
 };
 
 /*! @brief Validated configuration for the force/torque-to-thruster-force mapping algorithm.
@@ -34,6 +37,12 @@ struct ThrusterArrayConfiguration {
  * Only the selected rows of the control mapping matrix DG enter the solve. The solve thus applies no
  * condition to an unselected axis, and does not balance such an axis against the selected ones. The
  * selection must contain a minimum of one axis.
+ *
+ * thrusters.thrusterAvailability selects the thrusters the mapping may use. Only the columns of DG for the
+ * available thrusters enter the solve, so an unavailable thruster always receives a zero command. The
+ * controllability and conditioning checks thus apply to the available thrusters alone: create() rejects a
+ * configuration whose remaining thrusters cannot reach a selected axis. The array must contain a minimum
+ * of one available thruster.
  */
 class ForceTorqueThrForceMappingConfig final {
    public:
@@ -66,13 +75,20 @@ class ForceTorqueThrForceMappingConfig final {
             return false;
         }
         constexpr float normTolerance = 1e-3F;
+        bool anyAvailable = false;
         for (std::uint32_t i = 0; i < thrusters.numThrusters; ++i) {
             const Eigen::Vector3f direction(thrusters.thrusters.at(i).tHat_B.data());
             if (fabsf(direction.stableNorm() - 1.0F) > normTolerance) {
                 return false;
             }
+            anyAvailable = anyAvailable || isAvailable(thrusters, i);
         }
-        return true;
+        return anyAvailable;
+    }
+
+    //! True when thruster i takes part in the mapping.
+    static bool isAvailable(const ThrusterArrayConfiguration& thrusters, std::uint32_t index) {
+        return thrusters.thrusterAvailability.at(index) == fsw::DeviceAvailability::Available;
     }
     static bool isValidCenterOfMass_B(const Eigen::Vector3f& centerOfMass_B) { return centerOfMass_B.allFinite(); }
     // The selection names the axes the mapping controls, so it must name at least one. Which of the selected

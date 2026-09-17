@@ -19,6 +19,7 @@ ForceTorqueThrForceMappingConfig configFromC(const ForceTorqueThrForceMappingCon
             cppThrusters.thrusters.at(i).r_TB_B.at(j) = c.thrusters.thrusters[i].r_TB_B.data[j];
             cppThrusters.thrusters.at(i).tHat_B.at(j) = c.thrusters.thrusters[i].tHat_B.data[j];
         }
+        cppThrusters.thrusterAvailability.at(i) = fsw::toDeviceAvailability(c.thrusters.thrusterAvailability[i]);
     }
     std::array<bool, 6> cppAxes{};
     for (uint32_t i = 0; i < 6; ++i) {

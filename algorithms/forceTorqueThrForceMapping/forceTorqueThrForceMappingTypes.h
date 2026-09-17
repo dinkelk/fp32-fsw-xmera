@@ -2,6 +2,7 @@
 #define F32XMERA_FORCE_TORQUE_THR_FORCE_MAPPING_TYPES_H
 
 #include "msgPayloadDef/definitions.h"
+#include "utilities/fsw/deviceAvailability.h"
 #include "utilities/fsw/plainCAlgorithmDataTypes.h"
 
 #include <stdint.h>
@@ -24,10 +25,12 @@ typedef struct {
  * @brief Plain-old-data mirror of the C++ ThrusterArrayConfiguration fields.
  *  - numThrusters must be in [1, MAX_EFF_CNT]
  *  - thrusters[i] for i < numThrusters carries each thruster's geometry; trailing slots are ignored
+ *  - thrusterAvailability[i] excludes a thruster from the mapping; a minimum of one must be available
  */
 typedef struct {
     uint32_t numThrusters;
     ThrusterConfiguration_c thrusters[MAX_EFF_CNT];
+    DeviceAvailability_c thrusterAvailability[MAX_EFF_CNT];
 } ThrusterArrayConfiguration_c;
 
 /**

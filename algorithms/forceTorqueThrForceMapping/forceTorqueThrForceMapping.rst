@@ -17,7 +17,8 @@ Message Connection Descriptions
 -------------------------------
 The following table lists all the module input and output messages. The module msg connection is set by the user from
 python. The msg type contains a link to the message structure definition, while the description provides information
-on what this message is used for. Both the ``cmdTorqueInMsg`` and ``cmdForceInMsg`` are optional.
+on what this message is used for. The ``cmdTorqueInMsg``, ``cmdForceInMsg`` and ``thrAvailInMsg`` are
+optional.
 
 .. list-table:: Module I/O Messages
     :widths: 30 30 50
@@ -35,6 +36,12 @@ on what this message is used for. Both the ``cmdTorqueInMsg`` and ``cmdForceInMs
     * - thrConfigInMsg
       - :ref:`THRArrayConfigMsgPayload`
       - thruster cluster configuration input message
+    * - thrAvailInMsg
+      - :ref:`THRArrayAvailabilityMsgPayload`
+      - (optional) thruster availability input message. Entry ``[i]`` holds ``DEVICE_AVAILABLE`` or
+        ``DEVICE_UNAVAILABLE`` for thruster ``i``. Every thruster is available when the message is not
+        connected. The module reads it at ``reset()``, so the availability is fixed until the next
+        ``reset()`` or ``reconfigure()``.
     * - vehConfigInMsg
       - :ref:`VehicleConfigMsgPayload`
       - vehicle configuration input message
@@ -44,7 +51,9 @@ on what this message is used for. Both the ``cmdTorqueInMsg`` and ``cmdForceInMs
 
 Module Assumptions and Limitations
 ----------------------------------
-This module assumes that each thruster only produces positive thrust (on-pulsing only). Only the rows of the
+This module assumes that each thruster only produces positive thrust (on-pulsing only). An unavailable
+thruster takes no part in the mapping: the module keeps a zero column for it in :math:`[D]`, so it always
+receives a zero command. Only the rows of the
 stacked force/torque mapping matrix :math:`[D]` for the axes in ``desiredControlAxes_B`` enter the solve; the
 module sets the other rows to zero. The pseudo-inverse of :math:`[D]` is computed via a truncated SVD: singular values below the relative
 cutoff :math:`\sigma_{\max} \cdot \varepsilon_{f32} \cdot \max(6, N_{\max})` (the fp32 noise floor) are treated as
@@ -140,6 +149,14 @@ The relevant messages must then be subscribed to by the module::
     module.thrConfigInMsg.subscribeTo(thrConfigInMsg)
     module.vehConfigInMsg.subscribeTo(vehConfigInMsg)
 
+The ``thrAvailInMsg`` is optional. Connect it to exclude a thruster from the mapping::
+
+    thrAvailPayload = messaging.THRArrayAvailabilityMsgF32Payload()
+    availability = [messaging.DEVICE_AVAILABLE] * messaging.MAX_EFF_CNT
+    availability[deadThruster] = messaging.DEVICE_UNAVAILABLE
+    thrAvailPayload.thrusterAvailability = availability
+    module.thrAvailInMsg.subscribeTo(messaging.THRArrayAvailabilityMsgF32().write(thrAvailPayload))
+
 Detailed Module Description
 ---------------------------
 The following text describes the mathematics behind the ``forceTorqueThrForceMapping`` module.
@@ -191,6 +208,22 @@ The total force and torque on the spacecraft may be represented as
         F_{N}
     \end{bmatrix}
     = [D] \, \mathbf{F}
+
+Thruster Availability
+^^^^^^^^^^^^^^^^^^^^^
+``thrAvailInMsg`` names the thrusters the mapping may use. The module sets the column of :math:`[D]` for
+an unavailable thruster to zero before it computes the pseudo-inverse. The related row of
+:math:`[D]^{+}` is then zero, so the thruster receives a zero command. The shift in :math:`\mathbf{n}`
+also keeps it at zero.
+
+The controllability and conditioning checks thus see only the available thrusters. ``create()`` rejects a
+configuration whose remaining thrusters cannot reach a selected axis, instead of a mapping that ignores
+the request. The loss of a thruster can therefore make a previously valid configuration invalid. The
+operator then removes an axis from ``desiredControlAxes_B`` and calls ``reset()`` again.
+
+A thruster that stays in the configuration but produces no thrust is a different case, and the module
+cannot detect it. The mapping gives that thruster a share of the command, and the share is lost. Mark a
+failed thruster unavailable, or remove it from ``thrConfigInMsg``.
 
 Axis Selection
 ^^^^^^^^^^^^^^

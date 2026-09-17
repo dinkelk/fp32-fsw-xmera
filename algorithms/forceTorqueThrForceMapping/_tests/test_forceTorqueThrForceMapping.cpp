@@ -483,6 +483,98 @@ TEST(ForceTorqueThrForceMappingTest, DesiredControlAxesCoupledTorqueAxesRejected
     EXPECT_NO_THROW(makeMappingAlgorithm(config, Eigen::Vector3f::Zero(), {false, false, true, false, false, false}));
 }
 
+// ---------------------------------------------------------------------------
+// thrusterAvailability — an unavailable thruster takes no part in the mapping.
+// ---------------------------------------------------------------------------
+
+// Layout 1 keeps rank 5 when any single thruster is lost, so the mapping still configures. The lost
+// thruster always receives a zero command, and every command stays non-negative. Whether the commanded
+// force and torque is still met depends on the command: with one thruster gone, some commands have no
+// non-negative solution, and the clamp then moves the result away from them.
+TEST(ForceTorqueThrForceMappingTest, UnavailableThrusterIsNotCommanded) {
+    ThrusterArrayConfiguration config{};
+    ASSERT_TRUE(buildThrusterConfig(8U, rcsPositions1(), rcsDirections1(), config));
+    const Eigen::Vector3f CoM{0.1F, 0.1F, 0.1F};
+    constexpr std::array<bool, 6> kLayout1Axes{true, true, true, false, true, true};
+
+    for (std::uint32_t dead = 0; dead < 8U; ++dead) {
+        ThrusterArrayConfiguration degraded = config;
+        degraded.thrusterAvailability.at(dead) = fsw::DeviceAvailability::Unavailable;
+
+        const ForceTorqueThrForceMappingAlgorithm alg = makeMappingAlgorithm(degraded, CoM, kLayout1Axes);
+        const Eigen::Vector<float, kMaxThrusterCount> out = alg.update({0.4F, 0.2F, 0.4F}, {0.0F, 0.0F, 0.0F});
+
+        EXPECT_FLOAT_EQ(out[static_cast<int>(dead)], 0.0F) << "dead thruster " << dead << " was commanded";
+        for (int i = 0; i < kMaxThrusterCount; ++i) {
+            EXPECT_GE(out[i], 0.0F) << "dead thruster " << dead;
+        }
+    }
+}
+
+// With a thruster lost, a command the remaining array can still reach with non-negative thrust is still
+// met exactly. Thruster 1 carries no share of this command, so its loss changes nothing.
+TEST(ForceTorqueThrForceMappingTest, ReachableCommandSurvivesAnUnavailableThruster) {
+    ThrusterArrayConfiguration config{};
+    ASSERT_TRUE(buildThrusterConfig(8U, rcsPositions1(), rcsDirections1(), config));
+    const Eigen::Vector3f CoM{0.1F, 0.1F, 0.1F};
+    const Eigen::Vector3f cmdTorque{0.4F, 0.2F, 0.4F};
+    config.thrusterAvailability.at(1) = fsw::DeviceAvailability::Unavailable;
+
+    const ForceTorqueThrForceMappingAlgorithm alg =
+        makeMappingAlgorithm(config, CoM, {true, true, true, false, true, true});
+    const Eigen::Vector<float, kMaxThrusterCount> out = alg.update(cmdTorque, Eigen::Vector3f::Zero());
+
+    Eigen::Matrix<float, 6, kMaxThrusterCount> DG = buildDG(config, CoM);
+    DG.col(1).setZero();
+    const Eigen::Vector<float, 6> achieved = DG * out;
+    for (int axis = 0; axis < 3; ++axis) {
+        EXPECT_NEAR(achieved[axis], cmdTorque[axis], 1e-4F);
+    }
+    EXPECT_FLOAT_EQ(out[1], 0.0F);
+}
+
+// The loss of both thrusters of a couple drops the rank from 5 to 4. No axis becomes unreachable on its
+// own. The five selected axes can no longer be commanded independently, so create() rejects the selection.
+// A selection of four axes matches the remaining rank, and create() accepts it: the operator gives up an
+// axis and keeps the rest. This is the intended response to the rejection above.
+TEST(ForceTorqueThrForceMappingTest, UnavailableCoupleNeedsAReducedSelection) {
+    ThrusterArrayConfiguration config{};
+    ASSERT_TRUE(buildThrusterConfig(8U, rcsPositions1(), rcsDirections1(), config));
+    const Eigen::Vector3f CoM{0.1F, 0.1F, 0.1F};
+    constexpr std::array<bool, 6> kLayout1Axes{true, true, true, false, true, true};
+
+    config.thrusterAvailability.at(0) = fsw::DeviceAvailability::Unavailable;
+    config.thrusterAvailability.at(7) = fsw::DeviceAvailability::Unavailable;
+
+    EXPECT_THROW(makeMappingAlgorithm(config, CoM, kLayout1Axes), fsw::invalid_argument);
+
+    // Each of the five is still reachable on its own, so no single axis is the culprit.
+    for (std::size_t axis : {0U, 1U, 2U, 4U, 5U}) {
+        std::array<bool, 6> single{};
+        single.at(axis) = true;
+        EXPECT_NO_THROW(makeMappingAlgorithm(config, CoM, single)) << "axis " << axis;
+    }
+
+    // Give up force_z and the remaining four axes configure.
+    constexpr std::array<bool, 6> kReducedAxes{true, true, true, false, true, false};
+    EXPECT_NO_THROW(makeMappingAlgorithm(config, CoM, kReducedAxes));
+
+    // The reduced mapping still leaves both unavailable thrusters at zero.
+    const ForceTorqueThrForceMappingAlgorithm alg = makeMappingAlgorithm(config, CoM, kReducedAxes);
+    const Eigen::Vector<float, kMaxThrusterCount> out = alg.update({0.4F, 0.2F, 0.4F}, {0.0F, 0.9F, 0.0F});
+    EXPECT_FLOAT_EQ(out[0], 0.0F);
+    EXPECT_FLOAT_EQ(out[7], 0.0F);
+}
+
+// The array must keep a minimum of one available thruster.
+TEST(ForceTorqueThrForceMappingTest, NoAvailableThrusterIsRejected) {
+    ThrusterArrayConfiguration config{};
+    ASSERT_TRUE(buildThrusterConfig(8U, rcsPositions1(), rcsDirections1(), config));
+    config.thrusterAvailability.fill(fsw::DeviceAvailability::Unavailable);
+    EXPECT_THROW(makeMappingAlgorithm(config, {0.1F, 0.1F, 0.1F}, {true, true, true, false, true, true}),
+                 fsw::invalid_argument);
+}
+
 // An ill-conditioned (but full-rank) layout is rejected by create() even with no controllability assertion.
 // Six thrusters with 5 mm moment arms span all six axes, but the torque rows are ~5e-3 while the force rows
 // are unit, so cond(DG) ~ 200 (> 100). create() must reject it.

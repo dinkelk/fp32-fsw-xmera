@@ -107,6 +107,7 @@ inline bool buildThrusterConfig(std::uint32_t numThrusters,
 
     config = ThrusterArrayConfiguration{};
     config.numThrusters = numThrusters;
+    config.thrusterAvailability.fill(fsw::DeviceAvailability::Available);
     for (std::uint32_t i = 0; i < numThrusters; ++i) {
         config.thrusters.at(i).r_TB_B = {positions[i].x(), positions[i].y(), positions[i].z()};
 

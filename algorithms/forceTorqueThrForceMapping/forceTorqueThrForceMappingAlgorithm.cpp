@@ -20,9 +20,10 @@ struct ThrusterMapping {
  */
 Eigen::Vector<float, kMaxThrusterCount> computeNullSpaceShift(
     const Eigen::Matrix<float, kMaxThrusterCount, kMaxThrusterCount>& rightSingularVectors,
-    uint32_t numThrusters,
+    const ThrusterArrayConfiguration& thrusters,
     const Eigen::Vector<float, 6>& sv,
     float tol) {
+    const uint32_t numThrusters = thrusters.numThrusters;
     Eigen::Vector<float, kMaxThrusterCount> nullSpaceShift{Eigen::Vector<float, kMaxThrusterCount>::Zero()};
 
     // The null space of the active block has dimension numThrusters - rank. With no dimension to move in
@@ -34,12 +35,23 @@ Eigen::Vector<float, kMaxThrusterCount> computeNullSpaceShift(
             ++rank;
         }
     }
-    if (rank >= numThrusters) {
+    uint32_t numAvailable = 0;
+    for (uint32_t i = 0; i < numThrusters; ++i) {
+        if (ForceTorqueThrForceMappingConfig::isAvailable(thrusters, i)) {
+            ++numAvailable;
+        }
+    }
+    if (rank >= numAvailable) {
         return nullSpaceShift;
     }
 
+    // Ones over the available thrusters only: the shift must not raise a thruster the mapping cannot use.
     Eigen::Vector<float, kMaxThrusterCount> ones{Eigen::Vector<float, kMaxThrusterCount>::Zero()};
-    ones.head(numThrusters).setOnes();
+    for (uint32_t i = 0; i < numThrusters; ++i) {
+        if (ForceTorqueThrForceMappingConfig::isAvailable(thrusters, i)) {
+            ones(i) = 1.0F;
+        }
+    }
     nullSpaceShift = ones;
     for (int k = 0; k < 6; ++k) {
         if (sv(k) > tol) {
@@ -65,20 +77,24 @@ std::optional<ThrusterMapping> computeThrusterMapping(const ThrusterArrayConfigu
                                                       const std::array<bool, 6>& desiredControlAxes_B) {
     const uint32_t numThrusters = thrusters.numThrusters;
 
-    // Column-major moment arms (r - CoM) and unit thrust directions.
+    // Column-major moment arms (r - CoM) and unit thrust directions. An unavailable thruster keeps a zero
+    // column, which removes it from the solve: its row of the pseudo-inverse is then zero, so it receives a
+    // zero command, and the controllability and conditioning checks see only the available thrusters.
     Eigen::Matrix<float, 3, kMaxThrusterCount> r_TB_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
     Eigen::Matrix<float, 3, kMaxThrusterCount> tHat_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
     for (uint32_t i = 0; i < numThrusters; ++i) {
-        r_TB_B.col(i) = Eigen::Vector3f(thrusters.thrusters.at(i).r_TB_B.data());
-        tHat_B.col(i) = Eigen::Vector3f(thrusters.thrusters.at(i).tHat_B.data()).normalized();
+        if (ForceTorqueThrForceMappingConfig::isAvailable(thrusters, i)) {
+            r_TB_B.col(i) = Eigen::Vector3f(thrusters.thrusters.at(i).r_TB_B.data());
+            tHat_B.col(i) = Eigen::Vector3f(thrusters.thrusters.at(i).tHat_B.data()).normalized();
+        }
     }
-    Eigen::Matrix<float, 3, kMaxThrusterCount> r_TC_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
-    r_TC_B.leftCols(numThrusters) = r_TB_B.leftCols(numThrusters).colwise() - centerOfMass_B;
-
-    // DG: moment arms (rows 0-2), thrust directions (rows 3-5).
+    // DG: moment arms (rows 0-2), thrust directions (rows 3-5). The moment arm is taken per column so an
+    // unavailable thruster is not given one by the CoM subtraction.
     Eigen::Matrix<float, 3, kMaxThrusterCount> torquePntC_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
     for (uint32_t i = 0; i < numThrusters; ++i) {
-        torquePntC_B.col(i) = r_TC_B.col(i).cross(tHat_B.col(i));
+        if (ForceTorqueThrForceMappingConfig::isAvailable(thrusters, i)) {
+            torquePntC_B.col(i) = (r_TB_B.col(i) - centerOfMass_B).cross(tHat_B.col(i));
+        }
     }
     Eigen::Matrix<float, 6, kMaxThrusterCount> DGwithZeros{};
     DGwithZeros << torquePntC_B, tHat_B;
@@ -149,7 +165,7 @@ std::optional<ThrusterMapping> computeThrusterMapping(const ThrusterArrayConfigu
 
     // Shift direction: lies in the null space of DG, so DG * nullSpaceShift = 0.
     return ThrusterMapping{.pseudoInverseDG = pseudoInverseDG,
-                           .nullSpaceShift = computeNullSpaceShift(svd.matrixV(), numThrusters, sv, tol)};
+                           .nullSpaceShift = computeNullSpaceShift(svd.matrixV(), thrusters, sv, tol)};
 }
 
 }  // namespace

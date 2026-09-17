@@ -4,6 +4,7 @@
 #include "forceTorqueThrForceMappingAlgorithm.h"
 #include "msgPayloadDef/CmdForceBodyMsgF32Payload.h"
 #include "msgPayloadDef/CmdTorqueBodyMsgF32Payload.h"
+#include "msgPayloadDef/THRArrayAvailabilityMsgF32Payload.h"
 #include "msgPayloadDef/THRArrayCmdForceMsgF32Payload.h"
 #include "msgPayloadDef/THRArrayConfigMsgF32Payload.h"
 #include "msgPayloadDef/VehicleConfigMsgF32Payload.h"
@@ -29,14 +30,17 @@ class ForceTorqueThrForceMapping final : public SysModel {
     std::array<bool, 6> getDesiredControlAxes() const;
 
     /* declare module IO interfaces */
-    ReadFunctor<CmdTorqueBodyMsgF32Payload> cmdTorqueInMsg;    //!< (optional) vehicle control (Lr) input message
-    ReadFunctor<CmdForceBodyMsgF32Payload> cmdForceInMsg;      //!< (optional) vehicle control force input message
-    ReadFunctor<THRArrayConfigMsgF32Payload> thrConfigInMsg;   //!< thruster cluster configuration input message
+    ReadFunctor<CmdTorqueBodyMsgF32Payload> cmdTorqueInMsg;   //!< (optional) vehicle control (Lr) input message
+    ReadFunctor<CmdForceBodyMsgF32Payload> cmdForceInMsg;     //!< (optional) vehicle control force input message
+    ReadFunctor<THRArrayConfigMsgF32Payload> thrConfigInMsg;  //!< thruster cluster configuration input message
+    //! (optional) thruster availability input message; every thruster is available when it is not connected
+    ReadFunctor<THRArrayAvailabilityMsgF32Payload> thrAvailInMsg;
     ReadFunctor<VehicleConfigMsgF32Payload> vehConfigInMsg;    //!< vehicle config input message
     Message<THRArrayCmdForceMsgF32Payload> thrForceCmdOutMsg;  //!< thruster force command output message
 
    private:
     ForceTorqueThrForceMappingConfig toConfig();
+    ThrusterArrayConfiguration toThrusterArrayConfiguration(const THRArrayConfigMsgF32Payload& thrConfigIn);
     std::unique_ptr<ForceTorqueThrForceMappingAlgorithm> algorithm = nullptr;
     //! the axes the mapping controls (torque xyz then force xyz, all in body frame B)
     std::array<bool, 6> desiredControlAxes_B{true, true, true, true, true, true};
