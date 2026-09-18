@@ -11,32 +11,50 @@
 
 namespace {
 
-ForceTorqueThrForceMappingConfig configFromC(const ForceTorqueThrForceMappingConfig_c& c) {
-    ThrusterArrayConfiguration cppThrusters{};
-    cppThrusters.numThrusters = c.thrusters.numThrusters;
-    for (uint32_t i = 0; i < c.thrusters.numThrusters; ++i) {
-        for (uint32_t j = 0; j < 3; ++j) {
-            cppThrusters.thrusters.at(i).r_TB_B.at(j) = c.thrusters.thrusters[i].r_TB_B.data[j];
-            cppThrusters.thrusters.at(i).tHat_B.at(j) = c.thrusters.thrusters[i].tHat_B.data[j];
+// Reassemble the flattened C arguments into the C++ configuration structs. The flat argument
+// list is the shape of the extern "C" boundary only; everything behind this helper is struct
+// based, and ForceTorqueThrForceMappingConfig::create remains the single validation authority.
+ForceTorqueThrForceMappingConfig configFromC(uint32_t numThrusters,
+                                             const ThrusterGeometryArray_c& rThruster_B,
+                                             const ThrusterGeometryArray_c& tHatThruster_B,
+                                             const Vector3f_c& centerOfMass_B,
+                                             const ForceTorqueControlAxes_c& desiredControlAxes_B) {
+    ThrusterArrayConfiguration thrusters{};
+    thrusters.numThrusters = numThrusters;
+    // The flat argument list carries no availability, so every configured thruster takes part in the
+    // mapping. The availability-aware path is the xmera module, which has the availability message.
+    thrusters.thrusterAvailability.fill(fsw::DeviceAvailability::Available);
+    // Every slot is filled regardless of the count: create() reads only the first numThrusters of them,
+    // and leaving the rest at zero would otherwise depend on the caller's padding.
+    for (uint32_t i = 0; i < kMaxThrusterCount; ++i) {
+        for (uint32_t j = 0; j < 3U; ++j) {
+            thrusters.thrusters.at(i).r_TB_B.at(j) = rThruster_B.data[(i * 3U) + j];
+            thrusters.thrusters.at(i).tHat_B.at(j) = tHatThruster_B.data[(i * 3U) + j];
         }
-        cppThrusters.thrusterAvailability.at(i) = fsw::toDeviceAvailability(c.thrusters.thrusterAvailability[i]);
     }
-    std::array<bool, 6> cppAxes{};
-    for (uint32_t i = 0; i < 6; ++i) {
-        cppAxes.at(i) = (c.desiredControlAxes[i] != 0);
-    }
-    return ForceTorqueThrForceMappingConfig::create(
-        cppThrusters, cArrayToEigenVector3<float>(c.centerOfMass_B.data), cppAxes);
+
+    const std::array<bool, 6> axes{desiredControlAxes_B.torqueX,
+                                   desiredControlAxes_B.torqueY,
+                                   desiredControlAxes_B.torqueZ,
+                                   desiredControlAxes_B.forceX,
+                                   desiredControlAxes_B.forceY,
+                                   desiredControlAxes_B.forceZ};
+
+    return ForceTorqueThrForceMappingConfig::create(thrusters, cArrayToEigenVector3<float>(centerOfMass_B.data), axes);
 }
 
 }  // namespace
 
-uint32_t ForceTorqueThrForceMappingAlgorithm_getMaxEffCnt(void) { return kMaxThrusterCount; }
+uint32_t ForceTorqueThrForceMappingAlgorithm_getMaxThrusterCount(void) { return kMaxThrusterCount; }
 
 ForceTorqueThrForceMappingAlgorithmHandle* ForceTorqueThrForceMappingAlgorithm_create(
-    const ForceTorqueThrForceMappingConfig_c* config) {
+    uint32_t numThrusters,
+    const ThrusterGeometryArray_c* rThruster_B,
+    const ThrusterGeometryArray_c* tHatThruster_B,
+    const Vector3f_c* centerOfMass_B,
+    const ForceTorqueControlAxes_c* desiredControlAxes_B) {
     return fsw::createHandle<::ForceTorqueThrForceMappingAlgorithm, ForceTorqueThrForceMappingAlgorithmHandle>(
-        configFromC(*config));
+        configFromC(numThrusters, *rThruster_B, *tHatThruster_B, *centerOfMass_B, *desiredControlAxes_B));
 }
 
 void ForceTorqueThrForceMappingAlgorithm_destroy(ForceTorqueThrForceMappingAlgorithmHandle* self) {
@@ -44,16 +62,21 @@ void ForceTorqueThrForceMappingAlgorithm_destroy(ForceTorqueThrForceMappingAlgor
 }
 
 void ForceTorqueThrForceMappingAlgorithm_setConfig(ForceTorqueThrForceMappingAlgorithmHandle* self,
-                                                   const ForceTorqueThrForceMappingConfig_c* config) {
-    fsw::fromHandle<::ForceTorqueThrForceMappingAlgorithm>(self)->setConfig(configFromC(*config));
+                                                   uint32_t numThrusters,
+                                                   const ThrusterGeometryArray_c* rThruster_B,
+                                                   const ThrusterGeometryArray_c* tHatThruster_B,
+                                                   const Vector3f_c* centerOfMass_B,
+                                                   const ForceTorqueControlAxes_c* desiredControlAxes_B) {
+    fsw::fromHandle<::ForceTorqueThrForceMappingAlgorithm>(self)->setConfig(
+        configFromC(numThrusters, *rThruster_B, *tHatThruster_B, *centerOfMass_B, *desiredControlAxes_B));
 }
 
 ThrForceArray_c ForceTorqueThrForceMappingAlgorithm_update(const ForceTorqueThrForceMappingAlgorithmHandle* self,
-                                                           const Vector3f_c cmdTorque_B,
-                                                           const Vector3f_c cmdForce_B) {
+                                                           const Vector3f_c* cmdTorque_B,
+                                                           const Vector3f_c* cmdForce_B) {
     const Eigen::Vector<float, kMaxThrusterCount> out =
         fsw::fromHandle<const ::ForceTorqueThrForceMappingAlgorithm>(self)->update(
-            cArrayToEigenVector3<float>(cmdTorque_B.data), cArrayToEigenVector3<float>(cmdForce_B.data));
+            cArrayToEigenVector3<float>(cmdTorque_B->data), cArrayToEigenVector3<float>(cmdForce_B->data));
 
     ThrForceArray_c result{};
     eigenVectorToCArray(out, result.thrForce);
