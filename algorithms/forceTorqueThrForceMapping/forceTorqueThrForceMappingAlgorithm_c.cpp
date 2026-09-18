@@ -2,6 +2,7 @@
 
 #include "forceTorqueThrForceMappingAlgorithm.h"
 #include "forceTorqueThrForceMappingTypes.h"
+#include "utilities/fsw/deviceAvailability.h"
 #include "utilities/fsw/eigenSupport.h"
 #include "utilities/fsw/freestandingInvalidArgument.h"
 #include "utilities/fsw/opaqueHandle.h"
@@ -19,12 +20,10 @@ ForceTorqueThrForceMappingConfig configFromC(uint32_t numThrusters,
                                              const ThrusterGeometryArray_c& rThruster_B,
                                              const ThrusterGeometryArray_c& tHatThruster_B,
                                              const Vector3f_c& centerOfMass_B,
-                                             const ForceTorqueControlAxes_c& desiredControlAxes_B) {
+                                             const ForceTorqueControlAxes_c& desiredControlAxes_B,
+                                             const ThrusterAvailabilityArray_c& thrusterAvailability) {
     ThrusterArrayConfiguration thrusters{};
     thrusters.numThrusters = numThrusters;
-    // The flat argument list carries no availability, so every configured thruster takes part in the
-    // mapping. The availability-aware path is the xmera module, which has the availability message.
-    thrusters.thrusterAvailability.fill(fsw::DeviceAvailability::Available);
     // Every slot is filled regardless of the count: create() reads only the first numThrusters of them,
     // and leaving the rest at zero would otherwise depend on the caller's padding.
     for (uint32_t i = 0; i < kMaxThrusterCount; ++i) {
@@ -32,6 +31,10 @@ ForceTorqueThrForceMappingConfig configFromC(uint32_t numThrusters,
             thrusters.thrusters.at(i).r_TB_B.at(j) = rThruster_B.data[(i * 3U) + j];
             thrusters.thrusters.at(i).tHat_B.at(j) = tHatThruster_B.data[(i * 3U) + j];
         }
+        // DEVICE_AVAILABLE is 0 and DEVICE_UNAVAILABLE is 1, so the byte is an enumerator value and
+        // not a boolean flag. Converting through toDeviceAvailability keeps any other value out.
+        thrusters.thrusterAvailability.at(i) =
+            fsw::toDeviceAvailability(static_cast<DeviceAvailability_c>(thrusterAvailability.availability[i]));
     }
 
     const std::array<bool, 6> axes{desiredControlAxes_B.torqueX,
@@ -52,12 +55,14 @@ bool ForceTorqueThrForceMappingAlgorithm_validateConfig(uint32_t numThrusters,
                                                         const ThrusterGeometryArray_c* rThruster_B,
                                                         const ThrusterGeometryArray_c* tHatThruster_B,
                                                         const Vector3f_c* centerOfMass_B,
-                                                        const ForceTorqueControlAxes_c* desiredControlAxes_B) {
+                                                        const ForceTorqueControlAxes_c* desiredControlAxes_B,
+                                                        const ThrusterAvailabilityArray_c* thrusterAvailability) {
     // Attempt to build the config through the real create path (configFromC ->
     // ForceTorqueThrForceMappingConfig::create): success means valid, a throw means invalid.
     // Reusing create means this validation can never drift from the rules it enforces.
     try {
-        (void)configFromC(numThrusters, *rThruster_B, *tHatThruster_B, *centerOfMass_B, *desiredControlAxes_B);
+        (void)configFromC(
+            numThrusters, *rThruster_B, *tHatThruster_B, *centerOfMass_B, *desiredControlAxes_B, *thrusterAvailability);
         return true;
     } catch (const fsw::invalid_argument&) {
         return false;
@@ -69,9 +74,11 @@ ForceTorqueThrForceMappingAlgorithmHandle* ForceTorqueThrForceMappingAlgorithm_c
     const ThrusterGeometryArray_c* rThruster_B,
     const ThrusterGeometryArray_c* tHatThruster_B,
     const Vector3f_c* centerOfMass_B,
-    const ForceTorqueControlAxes_c* desiredControlAxes_B) {
-    return fsw::createHandle<::ForceTorqueThrForceMappingAlgorithm, ForceTorqueThrForceMappingAlgorithmHandle>(
-        configFromC(numThrusters, *rThruster_B, *tHatThruster_B, *centerOfMass_B, *desiredControlAxes_B));
+    const ForceTorqueControlAxes_c* desiredControlAxes_B,
+    const ThrusterAvailabilityArray_c* thrusterAvailability) {
+    return fsw::createHandle<::ForceTorqueThrForceMappingAlgorithm,
+                             ForceTorqueThrForceMappingAlgorithmHandle>(configFromC(
+        numThrusters, *rThruster_B, *tHatThruster_B, *centerOfMass_B, *desiredControlAxes_B, *thrusterAvailability));
 }
 
 void ForceTorqueThrForceMappingAlgorithm_destroy(ForceTorqueThrForceMappingAlgorithmHandle* self) {
@@ -83,9 +90,10 @@ void ForceTorqueThrForceMappingAlgorithm_setConfig(ForceTorqueThrForceMappingAlg
                                                    const ThrusterGeometryArray_c* rThruster_B,
                                                    const ThrusterGeometryArray_c* tHatThruster_B,
                                                    const Vector3f_c* centerOfMass_B,
-                                                   const ForceTorqueControlAxes_c* desiredControlAxes_B) {
-    fsw::fromHandle<::ForceTorqueThrForceMappingAlgorithm>(self)->setConfig(
-        configFromC(numThrusters, *rThruster_B, *tHatThruster_B, *centerOfMass_B, *desiredControlAxes_B));
+                                                   const ForceTorqueControlAxes_c* desiredControlAxes_B,
+                                                   const ThrusterAvailabilityArray_c* thrusterAvailability) {
+    fsw::fromHandle<::ForceTorqueThrForceMappingAlgorithm>(self)->setConfig(configFromC(
+        numThrusters, *rThruster_B, *tHatThruster_B, *centerOfMass_B, *desiredControlAxes_B, *thrusterAvailability));
 }
 
 ThrForceArray_c ForceTorqueThrForceMappingAlgorithm_update(const ForceTorqueThrForceMappingAlgorithmHandle* self,

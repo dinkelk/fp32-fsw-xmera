@@ -23,6 +23,13 @@ typedef struct {
 } ThrusterGeometryArray_c;
 
 /**
+ * @brief Availability of each thruster slot, one byte per slot: 0 available, 1 unavailable.
+ */
+typedef struct {
+    uint8_t availability[MAX_EFF_CNT];
+} ThrusterAvailabilityArray_c;
+
+/**
  * @brief Get the maximum thruster count constant for validation.
  * @return The maximum thruster count (kMaxThrusterCount).
  */
@@ -38,6 +45,9 @@ uint32_t ForceTorqueThrForceMappingAlgorithm_getMaxThrusterCount(void);
  *                             row major order; each must be a unit vector to within 1e-3.
  * @param centerOfMass_B       [m] Center of mass in the body frame; must be finite.
  * @param desiredControlAxes_B [-] Per-axis controllability assertions.
+ * @param thrusterAvailability [-] Availability of each thruster, one byte per slot: 0 available,
+ *                             1 unavailable. An unavailable thruster is left out of the mapping
+ *                             and always receives a zero command; a minimum of one must be available.
  * @return true when the configuration is valid. Never throws, so it can guard the throwing
  *         create/setConfig from an invalid configuration.
  */
@@ -45,7 +55,8 @@ bool ForceTorqueThrForceMappingAlgorithm_validateConfig(uint32_t numThrusters,
                                                         const ThrusterGeometryArray_c* rThruster_B,
                                                         const ThrusterGeometryArray_c* tHatThruster_B,
                                                         const Vector3f_c* centerOfMass_B,
-                                                        const ForceTorqueControlAxes_c* desiredControlAxes_B);
+                                                        const ForceTorqueControlAxes_c* desiredControlAxes_B,
+                                                        const ThrusterAvailabilityArray_c* thrusterAvailability);
 
 /**
  * @brief Construct a new ForceTorqueThrForceMappingAlgorithm from the supplied configuration.
@@ -61,6 +72,9 @@ bool ForceTorqueThrForceMappingAlgorithm_validateConfig(uint32_t numThrusters,
  *                             row major order; each must be a unit vector to within 1e-3.
  * @param centerOfMass_B       [m] Center of mass in the body frame; must be finite.
  * @param desiredControlAxes_B [-] The axes the mapping controls; a minimum of one must be selected.
+ * @param thrusterAvailability [-] Availability of each thruster, one byte per slot: 0 available,
+ *                             1 unavailable. An unavailable thruster is left out of the mapping
+ *                             and always receives a zero command; a minimum of one must be available.
  * @return Pointer to a new ForceTorqueThrForceMappingAlgorithm (must be destroyed).
  */
 ForceTorqueThrForceMappingAlgorithmHandle* ForceTorqueThrForceMappingAlgorithm_create(
@@ -68,7 +82,8 @@ ForceTorqueThrForceMappingAlgorithmHandle* ForceTorqueThrForceMappingAlgorithm_c
     const ThrusterGeometryArray_c* rThruster_B,
     const ThrusterGeometryArray_c* tHatThruster_B,
     const Vector3f_c* centerOfMass_B,
-    const ForceTorqueControlAxes_c* desiredControlAxes_B);
+    const ForceTorqueControlAxes_c* desiredControlAxes_B,
+    const ThrusterAvailabilityArray_c* thrusterAvailability);
 
 /**
  * @brief Destroy a previously created ForceTorqueThrForceMappingAlgorithm.
@@ -89,19 +104,23 @@ void ForceTorqueThrForceMappingAlgorithm_destroy(ForceTorqueThrForceMappingAlgor
  *                             row major order; each must be a unit vector to within 1e-3.
  * @param centerOfMass_B       [m] Center of mass in the body frame; must be finite.
  * @param desiredControlAxes_B [-] Per-axis controllability assertions.
+ * @param thrusterAvailability [-] Availability of each thruster, one byte per slot: 0 available,
+ *                             1 unavailable. An unavailable thruster is left out of the mapping
+ *                             and always receives a zero command; a minimum of one must be available.
  */
 void ForceTorqueThrForceMappingAlgorithm_setConfig(ForceTorqueThrForceMappingAlgorithmHandle* self,
                                                    uint32_t numThrusters,
                                                    const ThrusterGeometryArray_c* rThruster_B,
                                                    const ThrusterGeometryArray_c* tHatThruster_B,
                                                    const Vector3f_c* centerOfMass_B,
-                                                   const ForceTorqueControlAxes_c* desiredControlAxes_B);
+                                                   const ForceTorqueControlAxes_c* desiredControlAxes_B,
+                                                   const ThrusterAvailabilityArray_c* thrusterAvailability);
 
 /**
  * @brief Compute thruster force commands from the requested torque and force vectors.
  *
- * Entries 0..numThrusters-1 carry the non-negative per-thruster commands; trailing slots are
- * exactly zero. update() does not throw.
+ * Every entry carries a non-negative per-thruster command; an unavailable thruster receives exactly
+ * zero. update() does not throw.
  *
  * @param self        Pointer to the instance.
  * @param cmdTorque_B [Nm] requested control torque in body frame
