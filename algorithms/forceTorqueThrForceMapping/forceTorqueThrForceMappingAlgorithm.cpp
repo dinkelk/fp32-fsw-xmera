@@ -8,33 +8,106 @@
 
 namespace {
 
-/*! Truncated-SVD pseudo-inverse of the control mapping matrix DG (singular values below
- *  sigma_max * eps * max(m,n) are dropped). Returns nullopt when a desiredControlAxes_B axis is
- *  uncontrollable or the kept subspace is ill-conditioned (condition number > 100).
+//! Cached pseudo-inverse, and the direction update() shifts along to remove negative thrust.
+struct ThrusterMapping {
+    Eigen::Matrix<float, kMaxThrusterCount, 6> pseudoInverseDG;
+    Eigen::Vector<float, kMaxThrusterCount> nullSpaceShift;
+};
+
+/*! The part of the all-ones vector that lies in the null space of the kept row space of DG: one minus
+ *  its projection onto the right singular vectors of the kept singular values. Taken one rank-1
+ *  projection at a time -- a matrix of the kept vectors would need dynamically sized storage.
  */
-std::optional<Eigen::Matrix<float, kMaxThrusterCount, 6>> computeThrusterMapping(
+Eigen::Vector<float, kMaxThrusterCount> computeNullSpaceShift(
+    const Eigen::Matrix<float, kMaxThrusterCount, kMaxThrusterCount>& rightSingularVectors,
     const ThrusterArrayConfiguration& thrusters,
-    const Eigen::Vector3f& centerOfMass_B,
-    const std::array<bool, 6>& desiredControlAxes_B) {
+    const Eigen::Vector<float, 6>& sv,
+    float tol) {
     const uint32_t numThrusters = thrusters.numThrusters;
+    Eigen::Vector<float, kMaxThrusterCount> nullSpaceShift{Eigen::Vector<float, kMaxThrusterCount>::Zero()};
 
-    // Column-major moment arms (r - CoM) and unit thrust directions.
-    Eigen::Matrix<float, 3, kMaxThrusterCount> r_TB_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
-    Eigen::Matrix<float, 3, kMaxThrusterCount> tHat_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
-    for (uint32_t i = 0; i < numThrusters; ++i) {
-        r_TB_B.col(i) = Eigen::Vector3f(thrusters.thrusters.at(i).r_TB_B.data());
-        tHat_B.col(i) = Eigen::Vector3f(thrusters.thrusters.at(i).tHat_B.data()).normalized();
+    // The null space of the active block has dimension numThrusters - rank. With no dimension to move in
+    // there is no shift, and the projection below would return only its own round-off, whose direction is
+    // arbitrary. Test the rank rather than the size of that residual.
+    uint32_t rank = 0;
+    for (int k = 0; k < 6; ++k) {
+        if (sv(k) > tol) {
+            ++rank;
+        }
     }
-    Eigen::Matrix<float, 3, kMaxThrusterCount> r_TC_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
-    r_TC_B.leftCols(numThrusters) = r_TB_B.leftCols(numThrusters).colwise() - centerOfMass_B;
+    uint32_t numAvailable = 0;
+    for (uint32_t i = 0; i < numThrusters; ++i) {
+        if (ForceTorqueThrForceMappingConfig::isAvailable(thrusters, i)) {
+            ++numAvailable;
+        }
+    }
+    if (rank >= numAvailable) {
+        return nullSpaceShift;
+    }
 
-    // DG: moment arms (rows 0-2), thrust directions (rows 3-5).
+    // Ones over the available thrusters only: the shift must not raise a thruster the mapping cannot use.
+    Eigen::Vector<float, kMaxThrusterCount> ones{Eigen::Vector<float, kMaxThrusterCount>::Zero()};
+    for (uint32_t i = 0; i < numThrusters; ++i) {
+        if (ForceTorqueThrForceMappingConfig::isAvailable(thrusters, i)) {
+            ones(i) = 1.0F;
+        }
+    }
+    nullSpaceShift = ones;
+    for (int k = 0; k < 6; ++k) {
+        if (sv(k) > tol) {
+            const Eigen::Vector<float, kMaxThrusterCount> rowSpaceDirection = rightSingularVectors.col(k);
+            nullSpaceShift -= rowSpaceDirection.dot(ones) * rowSpaceDirection;
+        }
+    }
+    if (numThrusters < kMaxThrusterCount) {
+        nullSpaceShift.tail(kMaxThrusterCount - numThrusters).setZero();
+    }
+    return nullSpaceShift;
+}
+
+/*! The control mapping matrix DG: moment arms (rows 0-2) over the thrust directions (rows 3-5).
+ *
+ *  An unavailable thruster keeps a zero column and an unselected axis keeps a zero row, which removes each
+ *  from the solve without a change of shape. The pseudo-inverse of the reduced matrix reappears in the
+ *  padded one, so an unavailable thruster receives a zero command, and the controllability and conditioning
+ *  checks see only the available thrusters and the selected axes.
+ */
+Eigen::Matrix<float, 6, kMaxThrusterCount> buildControlMappingMatrix(const ThrusterArrayConfiguration& thrusters,
+                                                                     const Eigen::Vector3f& centerOfMass_B,
+                                                                     const std::array<bool, 6>& desiredControlAxes_B) {
     Eigen::Matrix<float, 3, kMaxThrusterCount> torquePntC_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
-    for (uint32_t i = 0; i < numThrusters; ++i) {
-        torquePntC_B.col(i) = r_TC_B.col(i).cross(tHat_B.col(i));
+    Eigen::Matrix<float, 3, kMaxThrusterCount> tHat_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
+    for (uint32_t i = 0; i < thrusters.numThrusters; ++i) {
+        if (ForceTorqueThrForceMappingConfig::isAvailable(thrusters, i)) {
+            const Eigen::Vector3f r_TB_B(thrusters.thrusters.at(i).r_TB_B.data());
+            tHat_B.col(i) = Eigen::Vector3f(thrusters.thrusters.at(i).tHat_B.data()).normalized();
+            torquePntC_B.col(i) = (r_TB_B - centerOfMass_B).cross(tHat_B.col(i));
+        }
     }
+
     Eigen::Matrix<float, 6, kMaxThrusterCount> DGwithZeros{};
     DGwithZeros << torquePntC_B, tHat_B;
+    for (int axis = 0; axis < 6; ++axis) {
+        if (!desiredControlAxes_B.at(static_cast<std::size_t>(axis))) {
+            DGwithZeros.row(axis).setZero();
+        }
+    }
+    return DGwithZeros;
+}
+
+/*! Truncated-SVD pseudo-inverse of the control mapping matrix DG (singular values below
+ *  sigma_max * eps * max(m,n) are dropped). Only the rows selected by desiredControlAxes_B take part:
+ *  the others are zeroed, which removes them from the solve without changing the fixed matrix shape.
+ *  Also returns the shift direction: the part of the all-ones vector lying in the null space of those
+ *  rows. Returns nullopt when a selected axis is uncontrollable or the kept subspace is
+ *  ill-conditioned (condition number > 100).
+ */
+std::optional<ThrusterMapping> computeThrusterMapping(const ThrusterArrayConfiguration& thrusters,
+                                                      const Eigen::Vector3f& centerOfMass_B,
+                                                      const std::array<bool, 6>& desiredControlAxes_B) {
+    const uint32_t numThrusters = thrusters.numThrusters;
+    const Eigen::Matrix<float, 6, kMaxThrusterCount> DGwithZeros =
+        buildControlMappingMatrix(thrusters, centerOfMass_B, desiredControlAxes_B);
 
     const Eigen::JacobiSVD<Eigen::Matrix<float, 6, kMaxThrusterCount>> svd(DGwithZeros,
                                                                            Eigen::ComputeFullU | Eigen::ComputeFullV);
@@ -49,8 +122,9 @@ std::optional<Eigen::Matrix<float, kMaxThrusterCount, 6>> computeThrusterMapping
         }
     }
 
-    // Controllability: an asserted axis projecting onto the truncated (uncontrollable) left singular vectors
-    // is not reachable.
+    // Controllability: a selected axis projecting onto the truncated (uncontrollable) left singular vectors
+    // is not reachable. Across the selected axes this is exactly the statement that the selected rows of DG
+    // have full row rank, so each one can be commanded independently of the others.
     constexpr float kControllabilityResidualSqTol = 1e-6F;
     const Eigen::Matrix<float, 6, 6>& U = svd.matrixU();
     for (int axis = 0; axis < 6; ++axis) {
@@ -68,8 +142,8 @@ std::optional<Eigen::Matrix<float, kMaxThrusterCount, 6>> computeThrusterMapping
         }
     }
 
-    // Conditioning: reject when the smallest kept singular value (the last above tol, sorted descending)
-    // drops below kConditioningTol of the largest, i.e. condition number > 100.
+    // Conditioning: over the selected rows, reject when the smallest kept singular value (the last above tol,
+    // sorted descending) drops below kConditioningTol of the largest, i.e. condition number > 100.
     constexpr float kConditioningTol = 1e-2F;
     float minKept = sv(0);
     for (int i = 0; i < 6; ++i) {
@@ -89,7 +163,9 @@ std::optional<Eigen::Matrix<float, kMaxThrusterCount, 6>> computeThrusterMapping
         pseudoInverseDG.bottomRows(kMaxThrusterCount - numThrusters).setZero();
     }
 
-    return pseudoInverseDG;
+    // Shift direction: lies in the null space of DG, so DG * nullSpaceShift = 0.
+    return ThrusterMapping{.pseudoInverseDG = pseudoInverseDG,
+                           .nullSpaceShift = computeNullSpaceShift(svd.matrixV(), thrusters, sv, tol)};
 }
 
 }  // namespace
@@ -112,14 +188,19 @@ ForceTorqueThrForceMappingAlgorithm::ForceTorqueThrForceMappingAlgorithm(
 //! Replace the configuration and recompute the thruster mapping matrix.
 void ForceTorqueThrForceMappingAlgorithm::setConfig(const ForceTorqueThrForceMappingConfig& config) {
     this->cfg = config;
-    const std::optional<Eigen::Matrix<float, kMaxThrusterCount, 6>> mapping = computeThrusterMapping(
+    const std::optional<ThrusterMapping> mapping = computeThrusterMapping(
         this->cfg.getThrusters(), this->cfg.getCenterOfMass_B(), this->cfg.getDesiredControlAxes());
     if (mapping.has_value()) {
-        this->pseudoInverseDG = *mapping;
+        this->pseudoInverseDG = mapping->pseudoInverseDG;
+        this->nullSpaceShift = mapping->nullSpaceShift;
     }
 }
 
-/*! Map the requested body torque and force to per-thruster forces (non-negative, shifted by their minimum).
+/*! Map the requested body torque and force to per-thruster forces (non-negative).
+ *
+ * Negative entries in the pseudo-inverse solution are removed by a shift along nullSpaceShift, which
+ * leaves the achieved force and torque on every selected axis unchanged. Entries no shift can lift are
+ * clamped.
  @param cmdTorque_B [Nm] requested control torque in body frame
  @param cmdForce_B [N] requested control force in body frame
  @return per-thruster force commands [N]
@@ -132,8 +213,26 @@ Eigen::Vector<float, kMaxThrusterCount> ForceTorqueThrForceMappingAlgorithm::upd
 
     const uint32_t numThrusters = this->cfg.getThrusters().numThrusters;
     Eigen::Vector<float, kMaxThrusterCount> thrusterForces = this->pseudoInverseDG * forceTorque_B;
-    const float minForce = thrusterForces.head(numThrusters).minCoeff();
-    thrusterForces.head(numThrusters).array() -= minForce;
+
+    // Shift along the null space of DG: it leaves the achieved force and torque unchanged. The step is
+    // the largest per-entry -F_j / n_j over the entries the shift reaches, lifting those to zero or above at once.
+    constexpr float kNullSpaceTol = 1e-6F;   //!< [-] below this, 1 has no component in the null space
+    constexpr float kShiftReachTol = 1e-1F;  //!< [-] below this fraction, the shift cannot lift the entry
+    const float shiftScale = this->nullSpaceShift.head(numThrusters).cwiseAbs().maxCoeff();
+    if (shiftScale > kNullSpaceTol) {
+        float step = 0.0F;
+        for (uint32_t j = 0; j < numThrusters; ++j) {
+            if (this->nullSpaceShift(j) > kShiftReachTol * shiftScale) {
+                step = fmaxf(step, -thrusterForces(j) / this->nullSpaceShift(j));
+            }
+        }
+        thrusterForces.head(numThrusters) += step * this->nullSpaceShift.head(numThrusters);
+    }
+
+    // The only step that moves the achieved force and torque away from the command.
+    for (uint32_t j = 0; j < numThrusters; ++j) {
+        thrusterForces(j) = fmaxf(thrusterForces(j), 0.0F);
+    }
 
     return thrusterForces;
 }

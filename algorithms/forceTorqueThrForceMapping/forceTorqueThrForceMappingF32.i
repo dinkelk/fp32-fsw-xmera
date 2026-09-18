@@ -25,6 +25,7 @@
 
 %include "msgPayloadDef/CmdTorqueBodyMsgF32Payload.h"
 %include "msgPayloadDef/CmdForceBodyMsgF32Payload.h"
+%include "msgPayloadDef/THRArrayAvailabilityMsgF32Payload.h"
 %include "msgPayloadDef/THRArrayConfigMsgF32Payload.h"
 %include "msgPayloadDef/VehicleConfigMsgF32Payload.h"
 %include "msgPayloadDef/THRArrayCmdForceMsgF32Payload.h"

@@ -17,7 +17,8 @@ Message Connection Descriptions
 -------------------------------
 The following table lists all the module input and output messages. The module msg connection is set by the user from
 python. The msg type contains a link to the message structure definition, while the description provides information
-on what this message is used for. Both the ``cmdTorqueInMsg`` and ``cmdForceInMsg`` are optional.
+on what this message is used for. The ``cmdTorqueInMsg``, ``cmdForceInMsg`` and ``thrAvailInMsg`` are
+optional.
 
 .. list-table:: Module I/O Messages
     :widths: 30 30 50
@@ -35,6 +36,12 @@ on what this message is used for. Both the ``cmdTorqueInMsg`` and ``cmdForceInMs
     * - thrConfigInMsg
       - :ref:`THRArrayConfigMsgPayload`
       - thruster cluster configuration input message
+    * - thrAvailInMsg
+      - :ref:`THRArrayAvailabilityMsgPayload`
+      - (optional) thruster availability input message. Entry ``[i]`` holds ``DEVICE_AVAILABLE`` or
+        ``DEVICE_UNAVAILABLE`` for thruster ``i``. Every thruster is available when the message is not
+        connected. The module reads it at ``reset()``, so the availability is fixed until the next
+        ``reset()`` or ``reconfigure()``.
     * - vehConfigInMsg
       - :ref:`VehicleConfigMsgPayload`
       - vehicle configuration input message
@@ -44,14 +51,18 @@ on what this message is used for. Both the ``cmdTorqueInMsg`` and ``cmdForceInMs
 
 Module Assumptions and Limitations
 ----------------------------------
-This module assumes that each thruster only produces positive thrust (on-pulsing only). The pseudo-inverse of the
-stacked force/torque mapping matrix :math:`[D]` is computed via a truncated SVD: singular values below the relative
+This module assumes that each thruster only produces positive thrust (on-pulsing only). An unavailable
+thruster takes no part in the mapping: the module keeps a zero column for it in :math:`[D]`, so it always
+receives a zero command. Only the rows of the
+stacked force/torque mapping matrix :math:`[D]` for the axes in ``desiredControlAxes_B`` enter the solve; the
+module sets the other rows to zero. The pseudo-inverse of :math:`[D]` is computed via a truncated SVD: singular values below the relative
 cutoff :math:`\sigma_{\max} \cdot \varepsilon_{f32} \cdot \max(6, N_{\max})` (the fp32 noise floor) are treated as
 zero, which projects uncontrollable directions in the 6-D command space out of the result. A thruster geometry whose
 kept singular subspace is ill-conditioned (condition number above 100) is rejected when the configuration is created,
 as the pseudo-inverse would otherwise amplify the command and fp32 round-off. The resulting solution is
-the minimum-norm least-squares projection onto the thruster set, shifted so the minimum thrust is zero. No off-pulsing,
-saturation handling, or thruster availability masking is performed within this module. All numeric computation uses
+the minimum-norm least-squares projection onto the thruster set, shifted within the null space of the selected rows of
+:math:`[D]` to remove negative thrust, and then held at or above zero. No off-pulsing, saturation handling, or thruster
+availability masking is performed within this module. All numeric computation uses
 single-precision (FP32).
 
 Module Architecture
@@ -71,13 +82,14 @@ Adapter layer (``forceTorqueThrForceMapping.h/.cpp``)
 Algorithm layer (``forceTorqueThrForceMappingAlgorithm.h/.cpp``)
     The pure FP32 algorithm with no framework dependencies. The immutable
     ``ForceTorqueThrForceMappingConfig`` (created via the static ``::create`` factory) carries the thruster
-    geometry, center of mass, and controllability assertions. Validators are: ``numThrusters`` :math:`\in
+    geometry, center of mass, and axis selection. Validators are: ``numThrusters`` :math:`\in
     [1, \text{MAX\_EFF\_CNT}]`, each active direction :math:`\hat{\mathbf{t}}_{i}` within 1e-3 of unit norm,
-    and ``centerOfMass_B`` finite (``Eigen::Vector3f::allFinite()``). The static ``::create`` factory is the only
-    place that throws ``fsw::invalid_argument``: on an invalid thruster array or center of mass, on an asserted
-    ``desiredControlAxes_B`` axis that is uncontrollable, or on an ill-conditioned thruster geometry (condition
-    number above 100). The constructor and ``setConfig`` then cache the pseudo-inverse from the validated config;
-    ``update()`` is ``const`` and never throws.
+    ``centerOfMass_B`` finite (``Eigen::Vector3f::allFinite()``), and ``desiredControlAxes_B`` with a minimum of
+    one selected axis. The static ``::create`` factory is the only place that throws ``fsw::invalid_argument``:
+    on an invalid thruster array, center of mass, or axis selection, on a selected ``desiredControlAxes_B`` axis
+    that is uncontrollable, or on an ill-conditioned thruster geometry (condition number above 100). The
+    constructor and ``setConfig`` then cache the pseudo-inverse from the validated config; ``update()`` is
+    ``const`` and never throws.
 
 C shim (``forceTorqueThrForceMappingAlgorithm_c.h/.cpp``)
     Pure-C ``extern "C"`` wrapper around the algorithm for Ada (Adamant) FFI. The opaque
@@ -97,15 +109,16 @@ Module Parameters
       - Description
     * - desiredControlAxes_B
       - ``std::array<bool, 6>``
-      - Per-axis controllability assertion in body frame :math:`B`. Entries ``[0..2]`` correspond to
-        torque components :math:`\tau_x, \tau_y, \tau_z` and entries ``[3..5]`` correspond to force
-        components :math:`F_x, F_y, F_z`. A ``true`` entry asserts that the corresponding axis must
-        be controllable by the configured thruster array; the assertion is cross-checked against the
-        SVD of :math:`[D]` in ``create()`` (invoked during ``reset()``). If any flagged axis
-        lies outside the column space of :math:`[D]`, the module throws ``fsw::invalid_argument``
-        (which surfaces in Python as ``RuntimeError``). Default is all-true (full controllability
-        asserted); set entries to ``False`` to opt out per axis when the thruster array is
-        intentionally rank-deficient.
+      - The axes that the mapping controls, in body frame :math:`B`. Entries ``[0..2]`` are the
+        torque components :math:`\tau_x, \tau_y, \tau_z`. Entries ``[3..5]`` are the force
+        components :math:`F_x, F_y, F_z`. Only the rows of :math:`[D]` for the selected axes enter
+        the solve. The solve thus applies no condition to an unselected axis, and does not balance
+        such an axis against the selected ones. Each selected axis must be controllable. ``create()``
+        (which ``reset()`` calls) compares the selection with the SVD of :math:`[D]`. If a selected
+        axis is outside the column space of :math:`[D]`, the module throws ``fsw::invalid_argument``.
+        Python shows this as ``RuntimeError``. The selection must contain a minimum of one axis.
+        ``create()`` rejects an all-false selection, because such a mapping commands zero thrust for
+        every input. The default selects all six axes.
 
 Initialization
 --------------
@@ -114,7 +127,7 @@ The module is configured by::
     module = forceTorqueThrForceMapping.ForceTorqueThrForceMapping()
     module.modelTag = "forceTorqueThrForceMappingTag"
     # Phase 1 (set before InitializeSimulation -> reset() builds the validated config):
-    # optional per-axis controllability assertion (torque xyz, force xyz in body frame B).
+    # the axes the mapping controls (torque xyz, force xyz in body frame B).
     module.desiredControlAxes_B = [True, True, True, True, True, False]
 
 The ``cmdForceInMsg`` and ``cmdTorqueInMsg`` are optional; if not connected the corresponding commanded vector is
@@ -135,6 +148,14 @@ The relevant messages must then be subscribed to by the module::
     module.cmdForceInMsg.subscribeTo(cmdForceInMsg)
     module.thrConfigInMsg.subscribeTo(thrConfigInMsg)
     module.vehConfigInMsg.subscribeTo(vehConfigInMsg)
+
+The ``thrAvailInMsg`` is optional. Connect it to exclude a thruster from the mapping::
+
+    thrAvailPayload = messaging.THRArrayAvailabilityMsgF32Payload()
+    availability = [messaging.DEVICE_AVAILABLE] * messaging.MAX_EFF_CNT
+    availability[deadThruster] = messaging.DEVICE_UNAVAILABLE
+    thrAvailPayload.thrusterAvailability = availability
+    module.thrAvailInMsg.subscribeTo(messaging.THRArrayAvailabilityMsgF32().write(thrAvailPayload))
 
 Detailed Module Description
 ---------------------------
@@ -188,6 +209,33 @@ The total force and torque on the spacecraft may be represented as
     \end{bmatrix}
     = [D] \, \mathbf{F}
 
+Thruster Availability
+^^^^^^^^^^^^^^^^^^^^^
+``thrAvailInMsg`` names the thrusters the mapping may use. The module sets the column of :math:`[D]` for
+an unavailable thruster to zero before it computes the pseudo-inverse. The related row of
+:math:`[D]^{+}` is then zero, so the thruster receives a zero command. The shift in :math:`\mathbf{n}`
+also keeps it at zero.
+
+The controllability and conditioning checks thus see only the available thrusters. ``create()`` rejects a
+configuration whose remaining thrusters cannot reach a selected axis, instead of a mapping that ignores
+the request. The loss of a thruster can therefore make a previously valid configuration invalid. The
+operator then removes an axis from ``desiredControlAxes_B`` and calls ``reset()`` again.
+
+A thruster that stays in the configuration but produces no thrust is a different case, and the module
+cannot detect it. The mapping gives that thruster a share of the command, and the share is lost. Mark a
+failed thruster unavailable, or remove it from ``thrConfigInMsg``.
+
+Axis Selection
+^^^^^^^^^^^^^^
+``desiredControlAxes_B`` names the axes that the mapping controls. The module sets the rows of :math:`[D]` for
+the unselected axes to zero before it computes the pseudo-inverse. To set a row to zero is equivalent to the
+removal of that row: the pseudo-inverse of the reduced matrix reappears as the related columns of the padded
+matrix, with zero columns where the rows were removed. The solve thus applies no condition to an unselected
+axis, and does not balance such an axis against the selected ones.
+
+A selected axis must be controllable. Across the selected axes, this condition is equivalent to full row rank
+of the selected rows of :math:`[D]`. Each selected axis is thus commandable independently of the others.
+
 The force required by each thruster is computed via the Moore-Penrose pseudo-inverse of :math:`[D]`, formed from
 its truncated singular value decomposition :math:`[D] = U \Sigma V^{T}`:
 
@@ -205,16 +253,47 @@ uncontrollable direction in the 6-D command space — equivalent to removing row
 entirely in the noise floor — without requiring an explicit row-by-row threshold.
 
 The pseudo-inverse output :math:`\mathbf{F}_{pre} = [D]^{+}\,\text{cmd}` may contain negative entries when the
-commanded force/torque pushes some thrusters into a sign opposite their direction vector. To ensure no commanded
-thrust is less than zero, the minimum thrust is subtracted from the thrust vector:
+commanded force/torque pushes some thrusters into a sign opposite their direction vector. A thruster cannot produce
+such a thrust. To remove the negative entries, the module shifts the solution along :math:`\mathbf{n}`, the part of
+the all-ones vector that lies in the null space of the selected rows of :math:`[D]`:
 
 .. math::
 
-    \mathbf{F} = \mathbf{F}_{pre} - \min(\mathbf{F}_{pre}) \cdot \mathbf{1}
+    \mathbf{n} = \mathbf{1} - V_{r} V_{r}^{T} \mathbf{1}
+
+where :math:`V_{r}` holds the right singular vectors of the kept singular values, which span the row space of
+:math:`[D]`. Because :math:`[D]\mathbf{n} = \mathbf{0}`, a shift along :math:`\mathbf{n}` keeps the achieved force
+and torque on every selected axis. The step is the smallest non-negative multiple that lifts each entry the shift can
+reach up to zero:
+
+.. math::
+
+    \alpha = \max\left(0,\; \max_{j\,:\,n_{j} > 0} \frac{-F_{pre,j}}{n_{j}}\right), \qquad
+    \mathbf{F} = \max\left(\mathbf{F}_{pre} + \alpha \mathbf{n},\; \mathbf{0}\right)
+
+One pass over the thrusters gives :math:`\alpha`, so the step needs no iteration. The final
+:math:`\max(\cdot, \mathbf{0})` holds the output at or above zero when no shift along :math:`\mathbf{n}` can lift an
+entry to zero.
+
+Two bounds keep the step usable.
+
+**A shift direction must exist.** The null space of the selected rows has dimension :math:`N - r`, with
+:math:`r` the number of kept singular values. With :math:`r = N` there is no null space, and the projection
+above returns only its own round-off, whose direction is arbitrary. The module tests :math:`r < N` rather than
+the size of that residual. Even with a null space, :math:`\mathbf{1}` can be orthogonal to it and give
+:math:`\mathbf{n} = \mathbf{0}`: a pair of parallel thrusters does this. The module thus also requires
+:math:`\|\mathbf{n}\|_\infty` to be above a small floor before it shifts.
+
+**The shift must reach the entry it lifts.** The step that brings entry :math:`j` to zero is
+:math:`-F_{pre,j} / n_{j}`, so a small :math:`n_{j}` makes it large, and the shift scales every other thruster
+by :math:`\alpha n_{k}`. To lift one barely-reachable thruster thus costs a large thrust on all the others.
+The module therefore takes the step only from the entries with :math:`n_{j}` above a tenth of
+:math:`\|\mathbf{n}\|_\infty`, and leaves the rest to the final :math:`\max(\cdot, \mathbf{0})`. A balanced
+layout is unaffected: there :math:`\mathbf{n} = \mathbf{1}`, so every entry sits at the maximum.
 
 Balanced Layouts and Null-Space Optimality
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The min-shift above preserves the requested force and torque precisely when the thruster layout is **balanced**,
+The shift above reduces to a subtraction of the minimum thrust when the thruster layout is **balanced**,
 i.e. when :math:`[D]\mathbf{1} = 0`. Expanding the rows of :math:`[D]`, balance is equivalent to two geometric
 conditions on the thruster array:
 
@@ -223,9 +302,16 @@ conditions on the thruster array:
     \sum_i \hat{\mathbf{t}}_i = \mathbf{0}, \qquad
     \sum_i \mathbf{r}_{T_i/C} \times \hat{\mathbf{t}}_i = \mathbf{0}
 
-When both hold, :math:`\mathbf{1} \in \ker([D])` (with :math:`\ker([D])` being the null space of :math:`[D]`) and
-shifting along :math:`\mathbf{1}` stays inside :math:`\{\mathbf{F} : [D]\mathbf{F} = \text{cmd}\}`, leaving the achieved
-force/torque exactly equal to the commanded value.
+When both hold, :math:`\mathbf{1} \in \ker([D])` (with :math:`\ker([D])` being the null space of :math:`[D]`), the
+projection above returns :math:`\mathbf{n} = \mathbf{1}`, and :math:`\alpha` becomes
+:math:`-\min(\mathbf{F}_{pre})`. The shift is then the subtraction of the minimum thrust, it stays inside
+:math:`\{\mathbf{F} : [D]\mathbf{F} = \text{cmd}\}`, and the achieved force and torque stay equal to the commanded
+value.
+
+The projection removes the need to measure how balanced a layout is. Thruster pointing errors of a few degrees move
+:math:`[D]\mathbf{1}` away from zero, but :math:`\mathbf{n}` stays in the null space of the perturbed
+:math:`[D]`, so the achieved force and torque still match the command. A measurement on the 8-thruster reference
+layout gives a worst-case relative error of 1e-6 at 5 degrees of pointing error.
 
 A further useful property of the pseudo-inverse on a balanced layout: :math:`\mathbf{F}_{pre}` lies in the row space
 of :math:`[D]`, which is orthogonal to :math:`\ker([D])`. Since :math:`\mathbf{1} \in \ker([D])`, this implies
@@ -240,21 +326,38 @@ where :math:`N` is the number of thrusters.
 
 **On a balanced layout with zero commanded body force, the single-direction shift along** :math:`\mathbf{1}` **is
 globally fuel-optimal** — no more general null-space optimization can reduce the total thrust further. Verified
-empirically on the 8-thruster reference layout across 15 representative torque commands: the min-shift solution and the
+empirically on the 8-thruster reference layout across 15 representative torque commands: the shift solution and the
 full linear program :math:`\min\,\mathbf{1}^{T}\mathbf{F}` subject to :math:`[D]\mathbf{F} = \text{cmd}` and
 :math:`\mathbf{F} \geq 0` produce identical total thrust to within fp32 noise, due to the layout's bilateral symmetry.
 Layouts with lower symmetry or nonzero commanded body force can break this equivalence and create headroom for a more
 general null-space optimization (e.g. linear programming over :math:`\ker([D])`).
 
-On **unbalanced** layouts (:math:`[D]\mathbf{1} \neq 0`), the min-shift perturbs the achieved force/torque by
-:math:`-\min(\mathbf{F}_{pre}) \cdot ([D]\mathbf{1})`.
+Unbalanced Layouts
+^^^^^^^^^^^^^^^^^^
+On an unbalanced layout (:math:`[D]\mathbf{1} \neq \mathbf{0}`) the all-ones vector is not in the null space, and
+:math:`\mathbf{n}` holds only the part of it that is. Two cases follow.
+
+If :math:`\mathbf{F}_{pre}` is already non-negative, :math:`\alpha` is zero and the module returns
+:math:`\mathbf{F}_{pre}` unchanged. A DV pair shows this: two parallel thrusters give
+:math:`\mathbf{n} = \mathbf{0}`, because the all-ones vector is orthogonal to the null space of the selected
+force row. A commanded force along the thrust direction thus divides evenly between the thrusters, and the module
+achieves the command exactly.
+
+If :math:`\mathbf{F}_{pre}` keeps a negative entry that no shift along :math:`\mathbf{n}` can lift, the final
+:math:`\max(\cdot, \mathbf{0})` sets that entry to zero, and the achieved force and torque leave the command. The
+command has no on-pulsing solution in this case, so a non-negative least-squares solve is the only method that can
+do better. Such a solve is iterative, and this module does not use one.
 
 Additional Information
 ----------------------
-For rank-deficient :math:`[D]` the minimum-norm solution is returned; uncontrollable directions in the 6-D command
-space are silently dropped by the SVD truncation. The optional ``desiredControlAxes_B`` parameter converts that silent
-drop into a fail-fast assertion at configuration time: if any axis flagged ``True`` in ``desiredControlAxes_B`` lies
-outside the column space of :math:`[D]`, ``create()`` (invoked from the adapter's ``reset()``) throws
-``fsw::invalid_argument`` rather than returning a solution that ignores the request. ``create()`` likewise rejects an
-ill-conditioned thruster geometry (kept condition number above 100), where the pseudo-inverse would amplify the
-command and fp32 round-off.
+For rank-deficient :math:`[D]` the minimum-norm solution is returned. The SVD truncation drops uncontrollable
+directions in the 6-D command space without a message. ``desiredControlAxes_B`` makes this a fail-fast rejection
+at configuration time: if a selected axis lies outside the column space of :math:`[D]`, ``create()`` (which the
+adapter's ``reset()`` calls) throws ``fsw::invalid_argument``. The module thus does not return a solution that
+ignores the request. ``create()`` also rejects an ill-conditioned thruster geometry (kept condition number above
+100), where the pseudo-inverse would amplify the command and the fp32 round-off.
+
+A thruster array that cannot produce a torque-free response on an axis can still control that axis. A pair of
+parallel thrusters, for example, controls the force along the thrust direction, but produces a torque about a
+center of mass that is off the symmetry line of the pair. Selection of the force axis alone keeps the torque rows
+out of the solve, and the module accepts such an array at any center of mass.

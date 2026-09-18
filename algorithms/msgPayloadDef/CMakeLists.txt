@@ -56,6 +56,9 @@ xmera_add_swig_message(RWSpeedMsgF32Payload)
 xmera_add_swig_message(STAttMsgF32Payload)
 xmera_add_swig_message(STSensorMsgF32Payload)
 xmera_add_swig_message(SunSearchPointFaultMsgPayload)
+xmera_add_swig_message(THRArrayAvailabilityMsgF32Payload
+                       TEMPLATE
+                       "${CMAKE_CURRENT_SOURCE_DIR}/THRArrayAvailabilityMsgF32Payload.i")
 xmera_add_swig_message(THRArrayCmdForceMsgF32Payload)
 xmera_add_swig_message(THRArrayConfigMsgF32Payload
                        TEMPLATE

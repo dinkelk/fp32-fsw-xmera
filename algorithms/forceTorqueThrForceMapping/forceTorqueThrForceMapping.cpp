@@ -21,8 +21,22 @@ void ForceTorqueThrForceMapping::reset(const uint64_t callTime) {
     VehicleConfigMsgF32Payload vehConfigIn = this->vehConfigInMsg();
     THRArrayConfigMsgF32Payload thrConfigIn = this->thrConfigInMsg();
 
+    ThrusterArrayConfiguration thrusterConfiguration = this->toThrusterArrayConfiguration(thrConfigIn);
+
+    this->algorithm = std::make_unique<ForceTorqueThrForceMappingAlgorithm>(ForceTorqueThrForceMappingConfig::create(
+        thrusterConfiguration, cArrayToEigenVector(vehConfigIn.CoM_B), this->desiredControlAxes_B));
+}
+
+/*! Build the algorithm's thruster array from the configuration message. Availability defaults to every
+ *  thruster available; when the optional message is connected, its flags replace that default.
+ @return ThrusterArrayConfiguration
+ @param thrConfigIn thruster cluster configuration payload
+*/
+ThrusterArrayConfiguration ForceTorqueThrForceMapping::toThrusterArrayConfiguration(
+    const THRArrayConfigMsgF32Payload& thrConfigIn) {
     ThrusterArrayConfiguration thrusterConfiguration{};
     thrusterConfiguration.numThrusters = thrConfigIn.numThrusters;
+    thrusterConfiguration.thrusterAvailability.fill(fsw::DeviceAvailability::Available);
     for (uint32_t i = 0; i < thrConfigIn.numThrusters; ++i) {
         if (thrConfigIn.thrusters[i].maxThrust <= 0.0F) {
             throw std::invalid_argument(
@@ -35,27 +49,22 @@ void ForceTorqueThrForceMapping::reset(const uint64_t callTime) {
         }
     }
 
-    this->algorithm = std::make_unique<ForceTorqueThrForceMappingAlgorithm>(ForceTorqueThrForceMappingConfig::create(
-        thrusterConfiguration, cArrayToEigenVector(vehConfigIn.CoM_B), this->desiredControlAxes_B));
+    if (this->thrAvailInMsg.isLinked()) {
+        const THRArrayAvailabilityMsgF32Payload availabilityIn = this->thrAvailInMsg();
+        for (uint32_t i = 0; i < thrConfigIn.numThrusters; ++i) {
+            thrusterConfiguration.thrusterAvailability.at(i) =
+                fsw::toDeviceAvailability(availabilityIn.thrusterAvailability[i]);
+        }
+    }
+
+    return thrusterConfiguration;
 }
 
 ForceTorqueThrForceMappingConfig ForceTorqueThrForceMapping::toConfig() {
     VehicleConfigMsgF32Payload vehConfigIn = this->vehConfigInMsg();
     THRArrayConfigMsgF32Payload thrConfigIn = this->thrConfigInMsg();
 
-    ThrusterArrayConfiguration thrusterConfiguration{};
-    thrusterConfiguration.numThrusters = thrConfigIn.numThrusters;
-    for (uint32_t i = 0; i < thrConfigIn.numThrusters; ++i) {
-        if (thrConfigIn.thrusters[i].maxThrust <= 0.0F) {
-            throw std::invalid_argument(
-                "forceTorqueThrForceMapping: A configured thruster has a non-sensible "
-                "saturation limit of <= 0 N!");
-        }
-        for (uint32_t j = 0; j < 3; ++j) {
-            thrusterConfiguration.thrusters.at(i).r_TB_B.at(j) = thrConfigIn.thrusters[i].rThrust_B[j];
-            thrusterConfiguration.thrusters.at(i).tHat_B.at(j) = thrConfigIn.thrusters[i].tHatThrust_B[j];
-        }
-    }
+    ThrusterArrayConfiguration thrusterConfiguration = this->toThrusterArrayConfiguration(thrConfigIn);
 
     return ForceTorqueThrForceMappingConfig::create(
         thrusterConfiguration, cArrayToEigenVector(vehConfigIn.CoM_B), this->desiredControlAxes_B);
@@ -99,16 +108,16 @@ void ForceTorqueThrForceMapping::updateState(const uint64_t callTime) {
     this->thrForceCmdOutMsg.write(thrForceCmdOut, this->moduleID, callTime);
 }
 
-/*! Setter for the desiredControlAxes_B controllability assertion vector. See the algorithm class for
- *  the layout (torque xyz then force xyz, all in body frame B).
+/*! Setter for the desiredControlAxes_B axis selection. See the algorithm class for the layout
+ *  (torque xyz then force xyz, all in body frame B).
  @return void
- @param desiredControlAxes per-axis controllability assertions
+ @param desiredControlAxes the axes the mapping controls
 */
 void ForceTorqueThrForceMapping::setDesiredControlAxes(const std::array<bool, 6>& desiredControlAxes) {
     this->desiredControlAxes_B = desiredControlAxes;
 }
 
-/*! Getter for the desiredControlAxes_B controllability assertion vector.
+/*! Getter for the desiredControlAxes_B axis selection.
  @return std::array<bool, 6>
 */
 std::array<bool, 6> ForceTorqueThrForceMapping::getDesiredControlAxes() const { return this->desiredControlAxes_B; }
