@@ -649,23 +649,55 @@ TEST(FlybyFilterAlgorithmMeasurements, WithoutMeasurementsGrowsCovarianceMonoton
 // Degenerate geometry: both the dynamics and the heading model divide by |r|.
 // ============================================================================
 
-TEST(FlybyFilterAlgorithmDegenerate, ZeroPositionMakesTheDynamicsNonFinite) {
-    // Documents the model's precondition: two-body gravity is singular at the central body, so a
-    // sigma point that reaches r = 0 produces a non-finite derivative.
+TEST(FlybyFilterAlgorithmDegenerate, ZeroPositionKeepsTheDynamicsFinite) {
+    // The MinGravityRange floor removes the 1/|r|^3 singularity at the central body. With the
+    // denominator clamped, v_dot stays linear in r all the way in, so it is finite everywhere and
+    // vanishes at the origin rather than producing Inf/NaN.
     TestState const atOrigin = makeState(Eigen::Vector3d::Zero(), Eigen::Vector3d(1.0, -2.0, 0.5));
     TestState const dot = FlybyDynamics{kMu}(0.0, atOrigin);
 
     EXPECT_TRUE(dot.get<filtering::Position<3>>().allFinite()) << "r_dot = v stays finite";
-    EXPECT_FALSE(dot.get<filtering::Velocity<3>>().allFinite()) << "v_dot = -mu/|r|^3 r is singular at r = 0";
+    EXPECT_TRUE(dot.get<filtering::Velocity<3>>().allFinite()) << "the floor keeps v_dot finite at r = 0";
+    EXPECT_TRUE(dot.get<filtering::Velocity<3>>().isZero(0.0)) << "v_dot -> 0 as r -> 0";
 }
 
-TEST(FlybyFilterAlgorithmDegenerate, ZeroPositionSeedMakesTimeUpdateReportFailure) {
-    // A filter seeded at the central body cannot propagate; timeUpdate must report the failure
-    // rather than silently publishing a non-finite estimate.
+TEST(FlybyFilterAlgorithmDegenerate, GravityFloorIsContinuousAtTheBoundary) {
+    // The clamp only engages strictly below the floor: exactly at |r| = MinGravityRange the guarded
+    // derivative still equals the unguarded -mu/|r|^3 r, so nothing at or above the floor is
+    // perturbed and the acceleration has no jump there.
+    Eigen::Vector3d const rAtFloor = Eigen::Vector3d(1.0, -2.0, 0.5).normalized() * MinGravityRange;
+    TestState const dot = FlybyDynamics{kMu}(0.0, makeState(rAtFloor, Eigen::Vector3d::Zero()));
+
+    Eigen::Vector3d const expected = -kMu / std::pow(rAtFloor.norm(), 3) * rAtFloor;
+    EXPECT_TRUE(dot.get<filtering::Velocity<3>>().isApprox(expected, 1E-12));
+}
+
+TEST(FlybyFilterAlgorithmDegenerate, GravityStaysBoundedBelowTheFloor) {
+    // Below the floor the acceleration decays linearly to zero instead of diverging, so its
+    // magnitude can never exceed the value reached at the floor itself.
+    double const maxAccel = kMu / (MinGravityRange * MinGravityRange);
+    Eigen::Vector3d const direction = Eigen::Vector3d(1.0, -2.0, 0.5).normalized();
+
+    for (double scale : {1.0, 1E-1, 1E-3, 1E-9, 0.0}) {
+        TestState const dot =
+            FlybyDynamics{kMu}(0.0, makeState(direction * (MinGravityRange * scale), Eigen::Vector3d::Zero()));
+        Eigen::Vector3d const vDot = dot.get<filtering::Velocity<3>>();
+
+        EXPECT_TRUE(vDot.allFinite()) << "scale=" << scale;
+        EXPECT_LE(vDot.norm(), maxAccel * (1.0 + 1E-12)) << "scale=" << scale;
+    }
+}
+
+TEST(FlybyFilterAlgorithmDegenerate, ZeroPositionSeedPropagatesToAFiniteEstimate) {
+    // A filter seeded at the central body used to poison its covariance with NaN and make
+    // timeUpdate report failure. With the floor in place the propagation is bounded, so the update
+    // succeeds and the estimate stays finite -- unphysical, but recoverable by later measurements.
     TestState const atOrigin = makeState(Eigen::Vector3d::Zero(), Eigen::Vector3d(1.0, -2.0, 0.5));
     FlybyFilterAlgorithm algo(baseConfig(atOrigin, diagCovariance(1.0, 1E-3)));
 
-    EXPECT_FALSE(algo.timeUpdate(10.0)) << "propagation from r = 0 must be reported as invalid";
+    EXPECT_TRUE(algo.timeUpdate(10.0)) << "the guarded dynamics propagate from r = 0 without diverging";
+    EXPECT_TRUE(algo.getState().raw().allFinite());
+    EXPECT_TRUE(finiteSymmetricPsd(algo.getCovariance()));
 }
 
 // ============================================================================

@@ -61,14 +61,31 @@ applied **at its own time tag**, and the estimate is then propagated forward to 
 Dynamics model
 ++++++++++++++
 The state evolves under two-body point-mass gravity, with :math:`\mu` the central-body gravitational
-parameter:
+parameter and :math:`r_\text{min}` a floor on the range entering the denominator:
 
 .. math::
     \boldsymbol{\dot{x}} = \left\{ \begin{matrix} \boldsymbol{v}_{B/N} \\
-    -\dfrac{\mu}{\lVert \boldsymbol{r}_{B/N} \rVert^3}\, \boldsymbol{r}_{B/N} \end{matrix} \right\}.
+    -\dfrac{\mu}{\max\left(\lVert \boldsymbol{r}_{B/N} \rVert,\, r_\text{min}\right)^3}\,
+    \boldsymbol{r}_{B/N} \end{matrix} \right\}.
 
 The dynamics functor carries :math:`\mu` (in internal units) and is set from the configuration; the SRuKF
 propagates the sigma points with the shared RK4 integrator.
+
+The floor (``MinGravityRange``, 1e-3 km) guards the :math:`1/r^3` singularity at the central body. It is
+purely defensive: no trajectory this filter estimates passes within a metre of the body centre, so for
+every physically meaningful state the dynamics are bit-for-bit the unguarded two-body model. Its purpose
+is numerical -- the SRuKF spreads sigma points about the mean, and a single sigma point landing on the
+origin would otherwise make its derivative non-finite and poison the entire propagated covariance.
+
+Clamping the denominator (rather than the whole acceleration term) keeps the model well behaved through
+the floor: the acceleration is continuous at :math:`r_\text{min}`, and below it becomes linear in
+:math:`\boldsymbol{r}_{B/N}`, tending to zero at the origin. That is exactly the interior field of a
+uniform-density sphere, so the guarded acceleration is bounded everywhere by :math:`\mu / r_\text{min}^2`.
+
+.. note::
+    Inside :math:`r_\text{min}` the dynamics are no longer physical. A filter that reaches the central
+    body still propagates to a finite estimate rather than reporting failure, so a state that lands there
+    is recovered through subsequent measurements, not flagged by the scheduler.
 
 Measurement model
 +++++++++++++++++
