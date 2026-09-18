@@ -3,6 +3,7 @@
 
 #include "forceTorqueThrForceMappingTypes.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -28,11 +29,30 @@ typedef struct {
 uint32_t ForceTorqueThrForceMappingAlgorithm_getMaxThrusterCount(void);
 
 /**
+ * @brief Report whether a configuration would be accepted by create/setConfig.
+ * @param numThrusters         [-] Number of configured thrusters, in [1, MAX_EFF_CNT]. Only the
+ *                             first numThrusters entries of the geometry take part in the mapping.
+ * @param rThruster_B          [m] Thruster locations in the body frame, three components per thruster
+ *                             in row major order.
+ * @param tHatThruster_B       [-] Thrust directions in the body frame, three components per thruster in
+ *                             row major order; each must be a unit vector to within 1e-3.
+ * @param centerOfMass_B       [m] Center of mass in the body frame; must be finite.
+ * @param desiredControlAxes_B [-] Per-axis controllability assertions.
+ * @return true when the configuration is valid. Never throws, so it can guard the throwing
+ *         create/setConfig from an invalid configuration.
+ */
+bool ForceTorqueThrForceMappingAlgorithm_validateConfig(uint32_t numThrusters,
+                                                        const ThrusterGeometryArray_c* rThruster_B,
+                                                        const ThrusterGeometryArray_c* tHatThruster_B,
+                                                        const Vector3f_c* centerOfMass_B,
+                                                        const ForceTorqueControlAxes_c* desiredControlAxes_B);
+
+/**
  * @brief Construct a new ForceTorqueThrForceMappingAlgorithm from the supplied configuration.
  *
- * Validates the configuration and immediately computes the thruster mapping matrix. Throws if
- * desiredControlAxes_B selects no axis, or if a selected axis is not controllable by the
- * configured thruster array.
+ * Validates the configuration and immediately computes the thruster mapping matrix. Validate the
+ * values with validateConfig first; invalid input throws -- if desiredControlAxes_B selects no axis,
+ * or if a selected axis is not controllable by the configured thruster array.
  * @param numThrusters         [-] Number of configured thrusters, in [1, MAX_EFF_CNT]. Only the
  *                             first numThrusters entries of the geometry take part in the mapping.
  * @param rThruster_B          [m] Thruster locations in the body frame, three components per thruster
@@ -59,7 +79,7 @@ void ForceTorqueThrForceMappingAlgorithm_destroy(ForceTorqueThrForceMappingAlgor
 /**
  * @brief Replace the configuration at runtime and recompute the thruster mapping matrix.
  *
- * Throws on invalid input.
+ * Validate the values with validateConfig first; invalid input throws.
  * @param self                 Pointer to the instance.
  * @param numThrusters         [-] Number of configured thrusters, in [1, MAX_EFF_CNT]. Only the
  *                             first numThrusters entries of the geometry take part in the mapping.
