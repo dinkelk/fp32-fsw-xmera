@@ -65,6 +65,36 @@ Eigen::Vector<float, kMaxThrusterCount> computeNullSpaceShift(
     return nullSpaceShift;
 }
 
+/*! The control mapping matrix DG: moment arms (rows 0-2) over the thrust directions (rows 3-5).
+ *
+ *  An unavailable thruster keeps a zero column and an unselected axis keeps a zero row, which removes each
+ *  from the solve without a change of shape. The pseudo-inverse of the reduced matrix reappears in the
+ *  padded one, so an unavailable thruster receives a zero command, and the controllability and conditioning
+ *  checks see only the available thrusters and the selected axes.
+ */
+Eigen::Matrix<float, 6, kMaxThrusterCount> buildControlMappingMatrix(const ThrusterArrayConfiguration& thrusters,
+                                                                     const Eigen::Vector3f& centerOfMass_B,
+                                                                     const std::array<bool, 6>& desiredControlAxes_B) {
+    Eigen::Matrix<float, 3, kMaxThrusterCount> torquePntC_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
+    Eigen::Matrix<float, 3, kMaxThrusterCount> tHat_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
+    for (uint32_t i = 0; i < thrusters.numThrusters; ++i) {
+        if (ForceTorqueThrForceMappingConfig::isAvailable(thrusters, i)) {
+            const Eigen::Vector3f r_TB_B(thrusters.thrusters.at(i).r_TB_B.data());
+            tHat_B.col(i) = Eigen::Vector3f(thrusters.thrusters.at(i).tHat_B.data()).normalized();
+            torquePntC_B.col(i) = (r_TB_B - centerOfMass_B).cross(tHat_B.col(i));
+        }
+    }
+
+    Eigen::Matrix<float, 6, kMaxThrusterCount> DGwithZeros{};
+    DGwithZeros << torquePntC_B, tHat_B;
+    for (int axis = 0; axis < 6; ++axis) {
+        if (!desiredControlAxes_B.at(static_cast<std::size_t>(axis))) {
+            DGwithZeros.row(axis).setZero();
+        }
+    }
+    return DGwithZeros;
+}
+
 /*! Truncated-SVD pseudo-inverse of the control mapping matrix DG (singular values below
  *  sigma_max * eps * max(m,n) are dropped). Only the rows selected by desiredControlAxes_B take part:
  *  the others are zeroed, which removes them from the solve without changing the fixed matrix shape.
@@ -76,38 +106,8 @@ std::optional<ThrusterMapping> computeThrusterMapping(const ThrusterArrayConfigu
                                                       const Eigen::Vector3f& centerOfMass_B,
                                                       const std::array<bool, 6>& desiredControlAxes_B) {
     const uint32_t numThrusters = thrusters.numThrusters;
-
-    // Column-major moment arms (r - CoM) and unit thrust directions. An unavailable thruster keeps a zero
-    // column, which removes it from the solve: its row of the pseudo-inverse is then zero, so it receives a
-    // zero command, and the controllability and conditioning checks see only the available thrusters.
-    Eigen::Matrix<float, 3, kMaxThrusterCount> r_TB_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
-    Eigen::Matrix<float, 3, kMaxThrusterCount> tHat_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
-    for (uint32_t i = 0; i < numThrusters; ++i) {
-        if (ForceTorqueThrForceMappingConfig::isAvailable(thrusters, i)) {
-            r_TB_B.col(i) = Eigen::Vector3f(thrusters.thrusters.at(i).r_TB_B.data());
-            tHat_B.col(i) = Eigen::Vector3f(thrusters.thrusters.at(i).tHat_B.data()).normalized();
-        }
-    }
-    // DG: moment arms (rows 0-2), thrust directions (rows 3-5). The moment arm is taken per column so an
-    // unavailable thruster is not given one by the CoM subtraction.
-    Eigen::Matrix<float, 3, kMaxThrusterCount> torquePntC_B{Eigen::Matrix<float, 3, kMaxThrusterCount>::Zero()};
-    for (uint32_t i = 0; i < numThrusters; ++i) {
-        if (ForceTorqueThrForceMappingConfig::isAvailable(thrusters, i)) {
-            torquePntC_B.col(i) = (r_TB_B.col(i) - centerOfMass_B).cross(tHat_B.col(i));
-        }
-    }
-    Eigen::Matrix<float, 6, kMaxThrusterCount> DGwithZeros{};
-    DGwithZeros << torquePntC_B, tHat_B;
-
-    // Remove the axes that the caller does not select. Zeroing a row is equivalent to deleting it: the
-    // pseudo-inverse of the reduced matrix reappears as the corresponding columns of the padded one, with
-    // zero columns where the rows were dropped. The solve thus applies no condition to an unselected axis,
-    // and does not balance such an axis against the selected ones.
-    for (int axis = 0; axis < 6; ++axis) {
-        if (!desiredControlAxes_B.at(static_cast<std::size_t>(axis))) {
-            DGwithZeros.row(axis).setZero();
-        }
-    }
+    const Eigen::Matrix<float, 6, kMaxThrusterCount> DGwithZeros =
+        buildControlMappingMatrix(thrusters, centerOfMass_B, desiredControlAxes_B);
 
     const Eigen::JacobiSVD<Eigen::Matrix<float, 6, kMaxThrusterCount>> svd(DGwithZeros,
                                                                            Eigen::ComputeFullU | Eigen::ComputeFullV);
