@@ -84,12 +84,9 @@ void InertialFilter::updateState(uint64_t currentSimNanos) {
     if (auto const stPayload = this->stAttInMsg(); static_cast<double>(stPayload.timeTag) > this->lastStTimeTag) {
         stAttData.timeTag = static_cast<double>(stPayload.timeTag);
         stAttData.sigma_BN = cArrayToEigenVector(stPayload.MRP_BdyInrtl).cast<double>();
+        rateData.timeTag = stAttData.timeTag;
+        rateData.rate = cArrayToEigenVector(stPayload.omega_BN_B).cast<double>();
         this->lastStTimeTag = stAttData.timeTag;
-    }
-
-    if (this->imuSensorBodyInMsg.isLinked() && this->imuSensorBodyInMsg.isWritten()) {
-        rateData.timeTag = currentSeconds;
-        rateData.rate = cArrayToEigenVector(this->imuSensorBodyInMsg().AngVelBody).cast<double>();
     }
 
     InertialFilterOutput const filterOutput = this->algorithm->update(currentSeconds, stAttData, rateData);

@@ -192,10 +192,6 @@ def stateUpdateRate(show_plots):
     stInMsg = messaging.STAttMsgF32()
     module.stAttInMsg.subscribeTo(stInMsg)
 
-    imuMessage = messaging.IMUSensorBodyMsgF32Payload()
-    imuInMsg = messaging.IMUSensorBodyMsgF32()
-    module.imuSensorBodyInMsg.subscribeTo(imuInMsg)
-
     np.random.seed(0)
     stSigma = module.stMeasurementNoiseStd
     gyroSigma = module.gyroMeasurementNoiseStd
@@ -204,10 +200,9 @@ def stateUpdateRate(show_plots):
     for i in range(num_steps):
         stMessage.timeTag = time[i]
         stMessage.MRP_BdyInrtl = (truth[i, 1:4] + np.random.normal(0, stSigma, 3)).tolist()
-        imuMessage.AngVelBody = (truthRate + np.random.normal(0, gyroSigma, 3)).tolist()
+        stMessage.omega_BN_B = (truthRate + np.random.normal(0, gyroSigma, 3)).tolist()
         if i > 5:
             stInMsg.write(stMessage, macros.sec2nano(time[i]))
-            imuInMsg.write(imuMessage, macros.sec2nano(time[i]))
         unitTestSim.ConfigureStopTime(macros.sec2nano(time[i + 1]))
         unitTestSim.ExecuteSimulation()
 
@@ -306,10 +301,6 @@ def outlierRecovery(show_plots):
     stInMsg = messaging.STAttMsgF32()
     module.stAttInMsg.subscribeTo(stInMsg)
 
-    imuMessage = messaging.IMUSensorBodyMsgF32Payload()
-    imuInMsg = messaging.IMUSensorBodyMsgF32()
-    module.imuSensorBodyInMsg.subscribeTo(imuInMsg)
-
     np.random.seed(0)
     stSigma = module.stMeasurementNoiseStd
     gyroSigma = module.gyroMeasurementNoiseStd
@@ -340,9 +331,8 @@ def outlierRecovery(show_plots):
         if i >= first_meas_step:
             stMessage.timeTag = time[i] + st_time_nudge
             stMessage.MRP_BdyInrtl = stValue.tolist()
+            stMessage.omega_BN_B = gyroValue.tolist()
             stInMsg.write(stMessage, macros.sec2nano(time[i]))
-            imuMessage.AngVelBody = gyroValue.tolist()
-            imuInMsg.write(imuMessage, macros.sec2nano(time[i]))
         unitTestSim.ConfigureStopTime(macros.sec2nano(time[i + 1]))
         unitTestSim.ExecuteSimulation()
 
@@ -479,8 +469,8 @@ def delayedMeasurement(show_plots):
     anchor had been dragged forward by the gap's propagation, a measurement time-stamped
     before the call time would be dropped instead of applied.
 
-    Star-tracker only (no gyro): the body rate stays at its initial value, so the attitude
-    propagates along the known truth and the propagation is directly observable."""
+    Every star-tracker payload carries the truth rate, so the rate state stays put and the
+    attitude propagates along the known truth, making the propagation directly observable."""
     testFailCount = 0
     testMessages = []
 
@@ -497,9 +487,9 @@ def delayedMeasurement(show_plots):
 
     def run_scenario(deliver_step):
         """Run phase-1 convergence, then deliver the single time[meas_idx] star-tracker
-        measurement at step `deliver_step` (always stamped at time[meas_idx]). Star-tracker
-        only (no gyro): the body rate stays at its initial value, so the attitude propagates
-        along the known truth. Returns (stateLog, covarLog, st_valid)."""
+        measurement at step `deliver_step` (always stamped at time[meas_idx]). The payload
+        carries the truth rate, so the rate state stays put and the attitude propagates along
+        the known truth. Returns (stateLog, covarLog, st_valid)."""
         unitTestSim = SimulationBaseClass.SimBaseClass()
         testProc = unitTestSim.CreateNewProcess("TestProcess")
         testProc.addTask(unitTestSim.CreateNewTask("unitTask", macros.sec2nano(dt)))
@@ -517,6 +507,7 @@ def delayedMeasurement(show_plots):
         unitTestSim.AddModelToTask("unitTask", stResLog)
 
         stMessage = messaging.STAttMsgF32Payload()
+        stMessage.omega_BN_B = truthRate.tolist()
         stInMsg = messaging.STAttMsgF32()
         module.stAttInMsg.subscribeTo(stInMsg)
 

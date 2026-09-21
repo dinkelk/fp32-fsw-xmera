@@ -1,8 +1,8 @@
 Executive Summary
 -----------------
 This module estimates the inertial-to-body attitude (as a Modified Rodrigues Parameter set) and the body
-angular rate using a square-root unscented Kalman filter (SRuKF), fusing star-tracker attitude
-measurements and gyro rates on a single measurement timeline. All computation is double precision; the
+angular rate using a square-root unscented Kalman filter (SRuKF), fusing the star-tracker attitude
+and rate measurements on a single measurement timeline. All computation is double precision; the
 message interface is fp32, so the adapter widens the incoming measurements and narrows the estimated
 attitude and body rate at the message boundary.
 
@@ -29,11 +29,8 @@ for.
       - Description
     * - stAttInMsg
       - :ref:`STAttMsgF32Payload`
-      - Input star-tracker attitude measurement (inertial-to-body MRP); required
-    * - imuSensorBodyInMsg
-      - :ref:`IMUSensorBodyMsgF32Payload`
-      - Input majority-voted MIMU data; its body-frame angular velocity (``AngVelBody``) is used as the
-        gyro measurement. Produced by :ref:`mimuMajorityVote`'s ``imuSensorBodyOutMsg`` (optional)
+      - Input star-tracker measurement; its inertial-to-body MRP (``MRP_BdyInrtl``) is the attitude
+        measurement and its body rate (``omega_BN_B``) the rate measurement; required
     * - navAttOutMsg
       - :ref:`NavAttMsgF32Payload`
       - Output message containing the estimated attitude and body rate
@@ -45,11 +42,11 @@ for.
       - Output message containing pre- and post-fit residuals for the star-tracker measurements
     * - filterGyroResOutMsg
       - :ref:`FilterResidualsMsgF32Payload`
-      - Output message containing pre- and post-fit residuals for the gyro measurements
+      - Output message containing pre- and post-fit residuals for the rate measurements
 
-The star-tracker time tag arrives as a ``float`` and is widened to ``double`` for the filter, so it must
-carry mission-elapsed seconds rather than an epoch-scale time. ``IMUSensorBodyMsgF32Payload`` has no time
-field, so the rate measurement is tagged at the module call time.
+Both measurements are tagged with the star-tracker time tag, so it must carry mission-elapsed seconds
+rather than an epoch-scale time. A payload whose time tag is not newer than the last one consumed is
+skipped, which drops the rate measurement along with the attitude one.
 
 
 Detailed Module Description
@@ -73,11 +70,11 @@ vector is set to zero in this module, so the rate behaves as a random walk drive
 
 Measurement model
 +++++++++++++++++
-Two types of measurements are processed by this filter: gyro measurements and star-tracker attitude
+Two types of measurements are processed by this filter: rate measurements and star-tracker attitude
 measurements. Each is expressed as a small model type satisfying the filteringCore ``Measurement``
 concept (``observation()``, ``model()``, ``noise()``, ``subtract()``), which the ``SRuKF`` consumes
-generically. For gyro measurements, the gyro rates are mapped directly to the rate component of the state
-via a :math:`3 \times 3` identity matrix, and the innovation is the plain vector difference.
+generically. For rate measurements, the measured rates are mapped directly to the rate component of
+the state via a :math:`3 \times 3` identity matrix, and the innovation is the plain vector difference.
 
 For the star-tracker measurement, the measured MRP attitude is compared against the attitude component of
 the state. The innovation is formed with the relative MRP difference (``subMrp`` in ``subtract()``) and
@@ -124,7 +121,7 @@ the problem-specific types and lets the core provide the estimator machinery. Th
     * - ``SRuKF<State, Dyn>``
       - ``SRuKF<InertialState, InertialDynamics>`` — the square-root UKF that owns the estimate
     * - ``measurement_queue<Measurement, N>``
-      - time-ordered buffer of the per-cycle star-tracker and gyro measurements
+      - time-ordered buffer of the per-cycle star-tracker attitude and rate measurements
     * - ``applySequentialRobust``
       - drains the queue, one ``timeUpdate`` + ``measurementUpdate`` per measurement, holding the anchor
 
@@ -177,7 +174,7 @@ Configuration parameters
       - star-tracker attitude measurement noise standard deviation
       - >= 0
     * - gyroMeasurementNoiseStd
-      - gyro measurement noise standard deviation
+      - rate measurement noise standard deviation
       - >= 0
 
 
@@ -200,7 +197,7 @@ configuration::
     np.fill_diagonal(processNoise, [sigmaAtt] * 3 + [sigmaRate] * 3)
     filter.processNoise = processNoise.tolist()
 
-    # Connect the input/output messages (stAttInMsg required, imuSensorBodyInMsg optional, ...), then the
+    # Connect the input/output messages (stAttInMsg required), then the
     # simulation calls reset() once before stepping. To restart the filter at runtime, call
     # reInitialize() (state + covariance reset to the configured seed) or reInitializeExceptPersistentStates() (keep the
     # current estimate, clear only the pending measurements and residual snapshots).
