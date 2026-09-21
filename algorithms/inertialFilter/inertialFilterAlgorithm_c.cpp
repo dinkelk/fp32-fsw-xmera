@@ -22,7 +22,7 @@ InertialFilterConfig configFromC(const double alpha,
                                  const InertialFilterStateVector_c& initialStateC,
                                  const InertialFilterStateMatrix_c& initialCovarianceC,
                                  const double stMeasurementNoiseStd,
-                                 const double gyroMeasurementNoiseStd) {
+                                 const double rateMeasurementNoiseStd) {
     Eigen::Matrix<double, INERTIAL_FILTER_NUM_STATES, 1> initialStateVec;
     for (int i = 0; i < INERTIAL_FILTER_NUM_STATES; ++i) {
         initialStateVec(i) = initialStateC.data[i];
@@ -41,7 +41,7 @@ InertialFilterConfig configFromC(const double alpha,
                                         InertialState(initialStateVec),
                                         initialCovariance,
                                         stMeasurementNoiseStd,
-                                        gyroMeasurementNoiseStd);
+                                        rateMeasurementNoiseStd);
 }
 
 // StAttResidualsOutput and RateResidualsOutput are distinct C++ types with identical fields; one
@@ -81,7 +81,7 @@ bool InertialFilterAlgorithm_validateConfig(double alpha,
                                             const InertialFilterStateVector_c* initialState,
                                             const InertialFilterStateMatrix_c* initialCovariance,
                                             double stMeasurementNoiseStd,
-                                            double gyroMeasurementNoiseStd) {
+                                            double rateMeasurementNoiseStd) {
     // Build the config through the same path create() uses: success means valid, a throw means
     // invalid. Sharing configFromC keeps the predicate from drifting from what create() accepts.
     try {
@@ -91,7 +91,7 @@ bool InertialFilterAlgorithm_validateConfig(double alpha,
                           *initialState,
                           *initialCovariance,
                           stMeasurementNoiseStd,
-                          gyroMeasurementNoiseStd);
+                          rateMeasurementNoiseStd);
         return true;
     } catch (const fsw::invalid_argument&) {
         return false;
@@ -104,9 +104,9 @@ InertialFilterAlgorithmHandle* InertialFilterAlgorithm_create(double alpha,
                                                               const InertialFilterStateVector_c* initialState,
                                                               const InertialFilterStateMatrix_c* initialCovariance,
                                                               double stMeasurementNoiseStd,
-                                                              double gyroMeasurementNoiseStd) {
+                                                              double rateMeasurementNoiseStd) {
     return fsw::createHandle<InertialFilterAlgorithm, InertialFilterAlgorithmHandle>(configFromC(
-        alpha, beta, *processNoise, *initialState, *initialCovariance, stMeasurementNoiseStd, gyroMeasurementNoiseStd));
+        alpha, beta, *processNoise, *initialState, *initialCovariance, stMeasurementNoiseStd, rateMeasurementNoiseStd));
 }
 
 void InertialFilterAlgorithm_destroy(InertialFilterAlgorithmHandle* self) {

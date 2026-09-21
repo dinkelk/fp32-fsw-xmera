@@ -43,7 +43,7 @@ void InertialFilter::reset(uint64_t /*currentSimNanos*/) {
                                                      InertialState{Eigen::Vector<double, n>(this->initialState)},
                                                      StateMatrix(this->initialCovariance),
                                                      this->stMeasurementNoiseStd,
-                                                     this->gyroMeasurementNoiseStd);
+                                                     this->rateMeasurementNoiseStd);
     this->algorithm = std::make_unique<InertialFilterAlgorithm>(config);
     this->lastStTimeTag = 0;
 }
@@ -67,7 +67,7 @@ void InertialFilter::reInitialize() {
     this->algorithm->reInitialize();
 }
 
-/*! Read star-tracker and gyro messages, call algorithm update, and write the output state and
+/*! Read the star-tracker message, call algorithm update, and write the output state and
  *  residuals.
  *  @return void
  *  @param currentSimNanos [ns] sim time the filter is advancing to */
@@ -101,7 +101,7 @@ void InertialFilter::writeOutputMessages(uint64_t currentSimNanos, InertialFilte
     NavAttMsgF32Payload navAttBuf{};
     FilterMsgF32Payload filterBuf{};
     FilterResidualsMsgF32Payload stResBuf{};
-    FilterResidualsMsgF32Payload gyroResBuf{};
+    FilterResidualsMsgF32Payload rateResBuf{};
 
     double const timeTag = static_cast<double>(currentSimNanos) * kNano2Sec;
 
@@ -124,17 +124,17 @@ void InertialFilter::writeOutputMessages(uint64_t currentSimNanos, InertialFilte
         eigenMatrixXToCArray(filterOutput.stAttResiduals.postFit, stResBuf.postFits);
     }
     if (filterOutput.rateResiduals.valid) {
-        gyroResBuf.timeTag = timeTag;
-        gyroResBuf.valid = true;
-        gyroResBuf.numberOfObservations = 1;
-        gyroResBuf.sizeOfObservations = 3;
-        eigenMatrixXToCArray(filterOutput.rateResiduals.observation, gyroResBuf.observation);
-        eigenMatrixXToCArray(filterOutput.rateResiduals.preFit, gyroResBuf.preFits);
-        eigenMatrixXToCArray(filterOutput.rateResiduals.postFit, gyroResBuf.postFits);
+        rateResBuf.timeTag = timeTag;
+        rateResBuf.valid = true;
+        rateResBuf.numberOfObservations = 1;
+        rateResBuf.sizeOfObservations = 3;
+        eigenMatrixXToCArray(filterOutput.rateResiduals.observation, rateResBuf.observation);
+        eigenMatrixXToCArray(filterOutput.rateResiduals.preFit, rateResBuf.preFits);
+        eigenMatrixXToCArray(filterOutput.rateResiduals.postFit, rateResBuf.postFits);
     }
 
     this->navAttOutMsg.write(navAttBuf, this->moduleID, currentSimNanos);
     this->filterOutMsg.write(filterBuf, this->moduleID, currentSimNanos);
     this->filterStResOutMsg.write(stResBuf, this->moduleID, currentSimNanos);
-    this->filterGyroResOutMsg.write(gyroResBuf, this->moduleID, currentSimNanos);
+    this->filterRateResOutMsg.write(rateResBuf, this->moduleID, currentSimNanos);
 }

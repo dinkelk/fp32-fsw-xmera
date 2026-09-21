@@ -43,7 +43,7 @@ uint32_t InertialFilterAlgorithm_getNumStates(void);
  * @param initialState            [-] N-element initial state seed.
  * @param initialCovariance       [-] N x N initial covariance P0; must be positive semi-definite.
  * @param stMeasurementNoiseStd   [-] star-tracker attitude measurement noise std; must be >= 0.
- * @param gyroMeasurementNoiseStd [rad/s] gyro rate measurement noise std; must be >= 0.
+ * @param rateMeasurementNoiseStd [rad/s] rate measurement noise std; must be >= 0.
  * @return true when the configuration is valid. Never throws, so it can guard the throwing
  *         create from an invalid configuration.
  */
@@ -53,7 +53,7 @@ bool InertialFilterAlgorithm_validateConfig(double alpha,
                                             const InertialFilterStateVector_c* initialState,
                                             const InertialFilterStateMatrix_c* initialCovariance,
                                             double stMeasurementNoiseStd,
-                                            double gyroMeasurementNoiseStd);
+                                            double rateMeasurementNoiseStd);
 
 /**
  * @brief Construct a filter from a validated configuration and seed its state/covariance.
@@ -63,7 +63,7 @@ bool InertialFilterAlgorithm_validateConfig(double alpha,
  * @param initialState            [-] N-element initial state seed.
  * @param initialCovariance       [-] N x N initial covariance P0; must be positive semi-definite.
  * @param stMeasurementNoiseStd   [-] star-tracker attitude measurement noise std; must be >= 0.
- * @param gyroMeasurementNoiseStd [rad/s] gyro rate measurement noise std; must be >= 0.
+ * @param rateMeasurementNoiseStd [rad/s] rate measurement noise std; must be >= 0.
  * @return owning handle to the new instance (destroy with InertialFilterAlgorithm_destroy)
  * @note create() validates the config and throws on invalid input; the exception propagates to Ada.
  */
@@ -73,7 +73,7 @@ InertialFilterAlgorithmHandle* InertialFilterAlgorithm_create(double alpha,
                                                               const InertialFilterStateVector_c* initialState,
                                                               const InertialFilterStateMatrix_c* initialCovariance,
                                                               double stMeasurementNoiseStd,
-                                                              double gyroMeasurementNoiseStd);
+                                                              double rateMeasurementNoiseStd);
 
 /**
  * @brief Destroy a filter instance.
@@ -95,11 +95,11 @@ void InertialFilterAlgorithm_reInitializeExceptPersistentStates(InertialFilterAl
 void InertialFilterAlgorithm_reInitialize(InertialFilterAlgorithmHandle* self);
 
 /**
- * @brief Advance the filter to currentSeconds, folding in fresh star-tracker and/or gyro readings.
+ * @brief Advance the filter to currentSeconds, folding in fresh star-tracker attitude and/or rate readings.
  * @param self           [-] filter handle
  * @param currentSeconds [s] simulation time to advance to
  * @param stAtt          [-] star-tracker attitude reading (timeTag > 0 to apply)
- * @param rate           [-] gyro reading (timeTag > 0 to apply)
+ * @param rate           [-] rate reading (timeTag > 0 to apply)
  * @return post-update filter snapshot (state, covariance, per-kind residuals)
  */
 InertialFilterOutput_c InertialFilterAlgorithm_update(InertialFilterAlgorithmHandle* self,

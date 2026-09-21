@@ -40,7 +40,7 @@ for.
     * - filterStResOutMsg
       - :ref:`FilterResidualsMsgF32Payload`
       - Output message containing pre- and post-fit residuals for the star-tracker measurements
-    * - filterGyroResOutMsg
+    * - filterRateResOutMsg
       - :ref:`FilterResidualsMsgF32Payload`
       - Output message containing pre- and post-fit residuals for the rate measurements
 
@@ -173,7 +173,7 @@ Configuration parameters
     * - stMeasurementNoiseStd
       - star-tracker attitude measurement noise standard deviation
       - >= 0
-    * - gyroMeasurementNoiseStd
+    * - rateMeasurementNoiseStd
       - rate measurement noise standard deviation
       - >= 0
 
@@ -190,7 +190,7 @@ configuration::
     filter.initialState = [0.0, 0.0, 0.0, 0.02, -0.005, 0.01]
     filter.initialCovariance = (1e-4 * np.identity(6)).tolist()
     filter.stMeasurementNoiseStd = 1e-4
-    filter.gyroMeasurementNoiseStd = 0.001
+    filter.rateMeasurementNoiseStd = 0.001
     sigmaAtt = (1e-7) ** 2
     sigmaRate = (1e-8) ** 2
     processNoise = np.zeros([6, 6])
