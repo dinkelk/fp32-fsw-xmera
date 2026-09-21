@@ -9,25 +9,24 @@
 #include <vector>
 
 // Build a per-sensor max-value array with every entry set to the same value.
-inline std::array<double, MAX_NUM_CSS_SENSORS> uniformMaxValues(double value) {
-    std::array<double, MAX_NUM_CSS_SENSORS> values{};
+inline std::array<double, kMaxNumCssSensors> uniformMaxValues(double value) {
+    std::array<double, kMaxNumCssSensors> values{};
     values.fill(value);
     return values;
 }
 
 // Reference computation that independently reimplements the cssComm algorithm
-inline std::array<double, MAX_NUM_CSS_SENSORS> referenceUpdate(
-    uint32_t numSensors,
-    const std::array<double, MAX_NUM_CSS_SENSORS>& maxSensorValues,
+inline std::array<double, kMaxNumCssSensors> referenceUpdate(
+    const std::array<double, kMaxNumCssSensors>& maxSensorValues,
     const std::array<double, kMaxNumChebyPolys>& chebyPolynomials,
-    const std::array<double, MAX_NUM_CSS_SENSORS>& inputValues) {
+    const std::array<double, kMaxNumCssSensors>& inputValues) {
     uint32_t i, j;
     double ChebyDiffFactor, ChebyPrev, ChebyNow, ChebyLocalPrev,
         ValueMult; /* Parameters used for the Chebyshev Recursion Forumula */
 
-    std::array<double, MAX_NUM_CSS_SENSORS> output{};
+    std::array<double, kMaxNumCssSensors> output{};
 
-    for (i = 0; i < numSensors; i++) {
+    for (i = 0; i < kMaxNumCssSensors; i++) {
         output[i] = inputValues[i] / maxSensorValues[i]; /* Scale Sensor Data */
 
         /* Seed the polynomial computations */
@@ -57,8 +56,7 @@ inline std::array<double, MAX_NUM_CSS_SENSORS> referenceUpdate(
     return output;
 }
 
-inline void regressionTestCssComm(uint32_t numSensors,
-                                  std::vector<double> maxSensorValues,
+inline void regressionTestCssComm(std::vector<double> maxSensorValues,
                                   std::vector<double> chebyCoeffs,
                                   std::vector<double> sensorInputRatios) {
     std::array<double, kMaxNumChebyPolys> polynomials{};
@@ -66,24 +64,24 @@ inline void regressionTestCssComm(uint32_t numSensors,
         polynomials[i] = chebyCoeffs[i];
     }
 
-    std::array<double, MAX_NUM_CSS_SENSORS> maxValues{};
-    for (std::size_t i = 0; i < maxSensorValues.size() && i < MAX_NUM_CSS_SENSORS; ++i) {
+    std::array<double, kMaxNumCssSensors> maxValues{};
+    for (std::size_t i = 0; i < maxSensorValues.size() && i < kMaxNumCssSensors; ++i) {
         maxValues[i] = maxSensorValues[i];
     }
 
-    CssCommAlgorithm alg{CssCommConfig::create(numSensors, maxValues, polynomials)};
+    CssCommAlgorithm alg{CssCommConfig::create(maxValues, polynomials)};
 
-    std::array<double, MAX_NUM_CSS_SENSORS> inputValues{};
-    for (std::size_t i = 0; i < sensorInputRatios.size() && i < MAX_NUM_CSS_SENSORS; ++i) {
+    std::array<double, kMaxNumCssSensors> inputValues{};
+    for (std::size_t i = 0; i < sensorInputRatios.size() && i < kMaxNumCssSensors; ++i) {
         inputValues[i] = sensorInputRatios[i] * maxValues[i];
     }
 
-    std::array<double, MAX_NUM_CSS_SENSORS> output{};
+    std::array<double, kMaxNumCssSensors> output{};
     EXPECT_NO_THROW(output = alg.update(inputValues));
 
-    auto reference = referenceUpdate(numSensors, maxValues, polynomials, inputValues);
+    auto reference = referenceUpdate(maxValues, polynomials, inputValues);
 
-    for (uint32_t i = 0; i < MAX_NUM_CSS_SENSORS; ++i) {
+    for (uint32_t i = 0; i < kMaxNumCssSensors; ++i) {
         EXPECT_NEAR(output[i], reference[i], 1e-12);
         EXPECT_TRUE(std::isfinite(output[i]));
         EXPECT_GE(output[i], 0.0);
