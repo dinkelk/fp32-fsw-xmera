@@ -38,7 +38,7 @@ using SRuKF = ::filtering::SRuKF<InertialState, InertialDynamics>;
 constexpr double kAlpha = 0.02;
 constexpr double kBeta = 2.0;
 constexpr double kStMeasStd = 1E-3;
-constexpr double kGyroMeasStd = 1E-3;
+constexpr double kRateMeasStd = 1E-3;
 
 State makeState(Eigen::Vector3d const& sigma, Eigen::Vector3d const& omega) {
     State s;
@@ -63,17 +63,17 @@ double rateTrace(Matrix6 const& P) { return P(3, 3) + P(4, 4) + P(5, 5); }
 
 // Validated config for the dynamics / timeUpdate / measurement tests.
 InertialFilterConfig baseConfig(State const& initial, Matrix6 const& P) {
-    return InertialFilterConfig::create(kAlpha, kBeta, smallProcessNoise(), initial, P, kStMeasStd, kGyroMeasStd);
+    return InertialFilterConfig::create(kAlpha, kBeta, smallProcessNoise(), initial, P, kStMeasStd, kRateMeasStd);
 }
 
 // baseConfig with an explicit process noise (for exercising process-noise-driven covariance growth).
 InertialFilterConfig configWithProcessNoise(State const& initial, Matrix6 const& P, Matrix6 const& processNoise) {
-    return InertialFilterConfig::create(kAlpha, kBeta, processNoise, initial, P, kStMeasStd, kGyroMeasStd);
+    return InertialFilterConfig::create(kAlpha, kBeta, processNoise, initial, P, kStMeasStd, kRateMeasStd);
 }
 
 // baseConfig with explicit measurement-noise standard deviations.
-InertialFilterConfig configWithNoiseStds(State const& initial, Matrix6 const& P, double stStd, double gyroStd) {
-    return InertialFilterConfig::create(kAlpha, kBeta, smallProcessNoise(), initial, P, stStd, gyroStd);
+InertialFilterConfig configWithNoiseStds(State const& initial, Matrix6 const& P, double stStd, double rateStd) {
+    return InertialFilterConfig::create(kAlpha, kBeta, smallProcessNoise(), initial, P, stStd, rateStd);
 }
 
 // A complete set of valid Config inputs; individual tests override one field to
@@ -85,12 +85,12 @@ struct ConfigInputs {
     State initialState = makeState(Eigen::Vector3d(0.0, 0.0, 0.05), Eigen::Vector3d::Zero());
     Matrix6 initialCovariance = diagCovariance(1E-2, 1E-3);
     double stMeasStd = kStMeasStd;
-    double gyroStd = kGyroMeasStd;
+    double rateStd = kRateMeasStd;
 };
 
 InertialFilterConfig buildConfig(ConfigInputs const& in) {
     return InertialFilterConfig::create(
-        in.alpha, in.beta, in.processNoise, in.initialState, in.initialCovariance, in.stMeasStd, in.gyroStd);
+        in.alpha, in.beta, in.processNoise, in.initialState, in.initialCovariance, in.stMeasStd, in.rateStd);
 }
 
 }  // namespace
@@ -148,15 +148,15 @@ TEST(InertialFilterConfig, RejectsNegativeNoiseStds) {
     stStd.stMeasStd = -1E-3;
     EXPECT_THROW(buildConfig(stStd), fsw::invalid_argument);
 
-    ConfigInputs gyroStd;
-    gyroStd.gyroStd = -1E-3;
-    EXPECT_THROW(buildConfig(gyroStd), fsw::invalid_argument);
+    ConfigInputs rateStd;
+    rateStd.rateStd = -1E-3;
+    EXPECT_THROW(buildConfig(rateStd), fsw::invalid_argument);
 }
 
 TEST(InertialFilterConfig, AcceptsZeroNoiseStds) {
     ConfigInputs in;
     in.stMeasStd = 0.0;
-    in.gyroStd = 0.0;
+    in.rateStd = 0.0;
     EXPECT_NO_THROW(buildConfig(in));
 }
 
@@ -173,8 +173,8 @@ TEST(InertialFilterConfig, AcceptsPositiveSemiDefiniteSingularMatrices) {
 TEST(InertialFilterConfig, StaticValidatorsCheckBoundaries) {
     EXPECT_TRUE(InertialFilterConfig::isValidStMeasurementNoiseStd(0.0));
     EXPECT_FALSE(InertialFilterConfig::isValidStMeasurementNoiseStd(-1E-9));
-    EXPECT_TRUE(InertialFilterConfig::isValidGyroMeasurementNoiseStd(0.0));
-    EXPECT_FALSE(InertialFilterConfig::isValidGyroMeasurementNoiseStd(-1E-9));
+    EXPECT_TRUE(InertialFilterConfig::isValidRateMeasurementNoiseStd(0.0));
+    EXPECT_FALSE(InertialFilterConfig::isValidRateMeasurementNoiseStd(-1E-9));
     EXPECT_TRUE(InertialFilterConfig::isValidProcessNoise(Matrix6::Identity()));
     EXPECT_FALSE(InertialFilterConfig::isValidProcessNoise(-Matrix6::Identity()));
     EXPECT_TRUE(InertialFilterConfig::isValidInitialCovariance(Matrix6::Identity()));
@@ -191,7 +191,7 @@ TEST(InertialFilterConfig, GettersRoundTrip) {
     EXPECT_DOUBLE_EQ(cfg.getAlpha(), kAlpha);
     EXPECT_DOUBLE_EQ(cfg.getBeta(), kBeta);
     EXPECT_DOUBLE_EQ(cfg.getStMeasurementNoiseStd(), kStMeasStd);
-    EXPECT_DOUBLE_EQ(cfg.getGyroMeasurementNoiseStd(), kGyroMeasStd);
+    EXPECT_DOUBLE_EQ(cfg.getRateMeasurementNoiseStd(), kRateMeasStd);
     EXPECT_TRUE(cfg.getProcessNoise().isApprox(in.processNoise, 1E-12));
     EXPECT_TRUE(cfg.getInitialCovariance().isApprox(in.initialCovariance, 1E-12));
     EXPECT_TRUE(cfg.getInitialState().raw().isApprox(in.initialState.raw(), 1E-12));
@@ -508,10 +508,10 @@ TEST(InertialFilterAlgorithmMeasurements, LargerMeasurementNoiseStdShrinksCovari
     st.timeTag = 1.0;
     st.sigma_BN = Eigen::Vector3d(0.0, 0.0, 0.05);
 
-    InertialFilterAlgorithm sharp(configWithNoiseStds(initial, P0, 1E-3, kGyroMeasStd));
+    InertialFilterAlgorithm sharp(configWithNoiseStds(initial, P0, 1E-3, kRateMeasStd));
     sharp.update(1.0, st, RateData{});
 
-    InertialFilterAlgorithm loose(configWithNoiseStds(initial, P0, 1E-1, kGyroMeasStd));
+    InertialFilterAlgorithm loose(configWithNoiseStds(initial, P0, 1E-1, kRateMeasStd));
     loose.update(1.0, st, RateData{});
 
     EXPECT_LT(attitudeTrace(sharp.getCovariance()), attitudeTrace(loose.getCovariance()));
@@ -594,7 +594,7 @@ TEST(InertialFilterAlgorithmMeasurementUpdate, RateMeasurementShrinksRateCovaria
     RateMeasurement r;
     r.timeTag = 0.0;
     r.omega_BN_B = Eigen::Vector3d(0.012, 0.008, 0.011);
-    r.covar = (kGyroMeasStd * kGyroMeasStd) * Eigen::Matrix3d::Identity();
+    r.covar = (kRateMeasStd * kRateMeasStd) * Eigen::Matrix3d::Identity();
     r.valid = true;
     EXPECT_TRUE(algo.measurementUpdate(r));
 
@@ -743,11 +743,11 @@ TEST(InertialFilterAlgorithmConvergence, ConvergesUnderNoisyMeasurements) {
     Eigen::Vector3d const truthSigma(0.1, -0.2, 0.15);
     Eigen::Vector3d const truthOmega(0.0, 0.0, 0.0);
     double const stStd = 1E-3;
-    double const gyroStd = 1E-3;
+    double const rateStd = 1E-3;
 
     State const initial = makeState(Eigen::Vector3d::Zero(), Eigen::Vector3d(0.05, 0.05, 0.05));
     Matrix6 const P0 = diagCovariance(1E-1, 1E-2);
-    InertialFilterAlgorithm algo(configWithNoiseStds(initial, P0, stStd, gyroStd));
+    InertialFilterAlgorithm algo(configWithNoiseStds(initial, P0, stStd, rateStd));
 
     std::mt19937 gen(42);
     std::normal_distribution<double> noise(0.0, 1.0);
@@ -760,7 +760,7 @@ TEST(InertialFilterAlgorithmConvergence, ConvergesUnderNoisyMeasurements) {
         st.sigma_BN = truthSigma + sample(stStd);
         RateData rate;
         rate.timeTag = i * dt;
-        rate.rate = truthOmega + sample(gyroStd);
+        rate.rate = truthOmega + sample(rateStd);
         algo.update(i * dt, st, rate);
     }
 
@@ -769,7 +769,7 @@ TEST(InertialFilterAlgorithmConvergence, ConvergesUnderNoisyMeasurements) {
     double const attErr = (algo.getState().get<filtering::MrpAttitude<3>>() - truthSigma).norm();
     double const rateErr = (algo.getState().get<filtering::AngularRate<3>>() - truthOmega).norm();
     EXPECT_LT(attErr, 10 * stStd) << "attitude error " << attErr;
-    EXPECT_LT(rateErr, 10 * gyroStd) << "rate error " << rateErr;
+    EXPECT_LT(rateErr, 10 * rateStd) << "rate error " << rateErr;
     EXPECT_LT(algo.getCovariance().trace(), P0.trace());
 }
 

@@ -19,7 +19,7 @@ typedef struct {
 } StAttData_c;
 
 /**
- * @brief C mirror of a raw gyro reading. timeTag > 0 flags a fresh reading.
+ * @brief C mirror of a raw rate reading. timeTag > 0 flags a fresh reading.
  */
 typedef struct {
     double timeTag; /*!< [s] measurement time tag */
@@ -43,7 +43,7 @@ typedef struct {
     double state[INERTIAL_FILTER_NUM_STATES];                                  /*!< estimated state */
     double covariance[INERTIAL_FILTER_NUM_STATES][INERTIAL_FILTER_NUM_STATES]; /*!< N x N covariance (row-major) */
     InertialResiduals_c stAttResiduals;                                        /*!< star-tracker attitude residuals */
-    InertialResiduals_c rateResiduals;                                         /*!< gyro rate residuals */
+    InertialResiduals_c rateResiduals;                                         /*!< rate residuals */
 } InertialFilterOutput_c;
 
 #ifdef __cplusplus

@@ -32,7 +32,7 @@ class StAttMeasurementModel {
     Eigen::Matrix3d measNoise;
 };
 
-/*! Predicted gyro observation = omega_BN_B. Satisfies the Measurement concept. */
+/*! Predicted rate observation = omega_BN_B. Satisfies the Measurement concept. */
 class RateMeasurementModel {
    public:
     static constexpr int size = 3;
@@ -97,7 +97,7 @@ void InertialFilterAlgorithm::reInitialize() {
  *  @return Snapshot of post-update filter state and residuals.
  *  @param currentSeconds [s] simulation time the filter is advancing to
  *  @param stAttData      [-] star-tracker attitude reading + time tag
- *  @param rateData       [-] gyro reading + time tag */
+ *  @param rateData       [-] rate reading + time tag */
 InertialFilterOutput InertialFilterAlgorithm::update(double currentSeconds,
                                                      StAttData const& stAttData,
                                                      RateData const& rateData) {
@@ -188,15 +188,15 @@ StAttMeasurement InertialFilterAlgorithm::packStAttMeasurement(StAttData const& 
     return packed;
 }
 
-/*! Pack a raw gyro reading into a RateMeasurement with diagonal noise covar.
+/*! Pack a raw rate reading into a RateMeasurement with diagonal noise covar.
  *  @return RateMeasurement (always valid)
  *  @param rateData [-] raw rate vector and time tag */
 RateMeasurement InertialFilterAlgorithm::packRateMeasurement(RateData const& rateData) const {
     RateMeasurement packed;
     packed.timeTag = rateData.timeTag;
     packed.omega_BN_B = rateData.rate;
-    double const gyroMeasNoiseStd = this->cfg.getGyroMeasurementNoiseStd();
-    packed.covar = (gyroMeasNoiseStd * gyroMeasNoiseStd) * Eigen::Matrix3d::Identity();
+    double const rateMeasNoiseStd = this->cfg.getRateMeasurementNoiseStd();
+    packed.covar = (rateMeasNoiseStd * rateMeasNoiseStd) * Eigen::Matrix3d::Identity();
     packed.valid = true;
     return packed;
 }

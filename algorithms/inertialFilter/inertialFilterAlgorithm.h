@@ -22,7 +22,7 @@ struct StAttData {
     Eigen::Vector3d sigma_BN = Eigen::Vector3d::Zero();
 };
 
-/*! Raw gyro reading consumed by InertialFilterAlgorithm::update(). `timeTag` > 0
+/*! Raw rate reading consumed by InertialFilterAlgorithm::update(). `timeTag` > 0
  *  flags that the adapter saw a fresh reading this cycle. */
 struct RateData {
     double timeTag = 0;
@@ -52,7 +52,7 @@ class InertialFilterConfig final {
                                        InertialState const& initialState,
                                        StateMatrix const& initialCovariance,
                                        double stMeasurementNoiseStd,
-                                       double gyroMeasurementNoiseStd) {
+                                       double rateMeasurementNoiseStd) {
         if (!Srukf::alphaIsValid(alpha)) {
             FSW_THROW_INVALID_ARGUMENT("inertialFilter: alpha must be in (0, 1]");
         }
@@ -71,11 +71,11 @@ class InertialFilterConfig final {
         if (!isValidStMeasurementNoiseStd(stMeasurementNoiseStd)) {
             FSW_THROW_INVALID_ARGUMENT("inertialFilter: ST measurement noise std must not be negative");
         }
-        if (!isValidGyroMeasurementNoiseStd(gyroMeasurementNoiseStd)) {
-            FSW_THROW_INVALID_ARGUMENT("inertialFilter: gyro measurement noise std must not be negative");
+        if (!isValidRateMeasurementNoiseStd(rateMeasurementNoiseStd)) {
+            FSW_THROW_INVALID_ARGUMENT("inertialFilter: rate measurement noise std must not be negative");
         }
         return {
-            alpha, beta, processNoise, initialState, initialCovariance, stMeasurementNoiseStd, gyroMeasurementNoiseStd};
+            alpha, beta, processNoise, initialState, initialCovariance, stMeasurementNoiseStd, rateMeasurementNoiseStd};
     }
 
     static bool isValidProcessNoise(StateMatrix const& processNoise) {
@@ -86,7 +86,7 @@ class InertialFilterConfig final {
         return covariance.allFinite() && isPositiveSemiDefinite<InertialState::size>(covariance);
     }
     static bool isValidStMeasurementNoiseStd(double noiseStd) { return noiseStd >= 0.0; }
-    static bool isValidGyroMeasurementNoiseStd(double noiseStd) { return noiseStd >= 0.0; }
+    static bool isValidRateMeasurementNoiseStd(double noiseStd) { return noiseStd >= 0.0; }
 
     double getAlpha() const { return this->alpha; }
     double getBeta() const { return this->beta; }
@@ -94,7 +94,7 @@ class InertialFilterConfig final {
     InertialState const& getInitialState() const { return this->initialState; }
     StateMatrix const& getInitialCovariance() const { return this->initialCovariance; }
     double getStMeasurementNoiseStd() const { return this->stMeasNoiseStd; }
-    double getGyroMeasurementNoiseStd() const { return this->gyroMeasNoiseStd; }
+    double getRateMeasurementNoiseStd() const { return this->rateMeasNoiseStd; }
 
    private:
     InertialFilterConfig(double alpha,
@@ -103,14 +103,14 @@ class InertialFilterConfig final {
                          InertialState const& initialState,
                          StateMatrix const& initialCovariance,
                          double stMeasurementNoiseStd,
-                         double gyroMeasurementNoiseStd)
+                         double rateMeasurementNoiseStd)
         : alpha(alpha),
           beta(beta),
           processNoise(processNoise),
           initialState(initialState),
           initialCovariance(initialCovariance),
           stMeasNoiseStd(stMeasurementNoiseStd),
-          gyroMeasNoiseStd(gyroMeasurementNoiseStd) {}
+          rateMeasNoiseStd(rateMeasurementNoiseStd) {}
 
     double alpha;
     double beta;
@@ -118,11 +118,11 @@ class InertialFilterConfig final {
     InertialState initialState;
     StateMatrix initialCovariance;
     double stMeasNoiseStd;
-    double gyroMeasNoiseStd;
+    double rateMeasNoiseStd;
 };
 
 /*! @brief Inertial attitude square-root UKF. Estimates the inertial-to-body MRP attitude and the body
- *  angular rate from star-tracker attitude measurements and gyro rates on one timeline. */
+ *  angular rate from star-tracker attitude and rate measurements on one timeline. */
 class InertialFilterAlgorithm {
    public:
     using State = InertialState;

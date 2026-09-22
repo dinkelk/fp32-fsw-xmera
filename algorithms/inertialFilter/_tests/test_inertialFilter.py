@@ -5,7 +5,7 @@
 # Basilisk inertialUKF test (attDetermination/InertialUKF/_UnitTest/test_inertialKF.py),
 # but the filter dynamics are MRP attitude kinematics (state = [sigma_BN, omega_BN_B])
 # and the measurements/messages are the fp32 SRuKF ones: a star-tracker attitude input
-# (STAttMsgPayload) and a gyro buffer input (AccDataMsgPayload), with the estimate and
+# (STAttMsgPayload), whose attitude and rate are both folded in, with the estimate and
 # covariance read back from filterOutMsg (FilterMsgPayload).
 
 import inertialFilter_test_utilities as filter_plots
@@ -61,7 +61,7 @@ def setupFilterData(filterObject):
     filterObject.processNoise = qNoiseIn.tolist()
 
     filterObject.stMeasurementNoiseStd = 0.00017
-    filterObject.gyroMeasurementNoiseStd = 0.0017
+    filterObject.rateMeasurementNoiseStd = 0.0017
 
 
 def test_stateUpdateInertialAttitude(show_plots):
@@ -157,8 +157,8 @@ def test_stateUpdateRate(show_plots):
 
 
 def stateUpdateRate(show_plots):
-    """Feed gyro rate measurements and the matching rotating star-tracker attitude, and
-    check the rate estimate converges to the gyro rate while the attitude tracks truth."""
+    """Feed star-tracker rate measurements and the matching rotating attitude, and check
+    the rate estimate converges to the measured rate while the attitude tracks truth."""
     testFailCount = 0
     testMessages = []
 
@@ -179,8 +179,8 @@ def stateUpdateRate(show_plots):
     unitTestSim.AddModelToTask(unitTaskName, filterLog)
     stResLog = module.filterStResOutMsg.recorder()
     unitTestSim.AddModelToTask(unitTaskName, stResLog)
-    gyroResLog = module.filterGyroResOutMsg.recorder()
-    unitTestSim.AddModelToTask(unitTaskName, gyroResLog)
+    rateResLog = module.filterRateResOutMsg.recorder()
+    unitTestSim.AddModelToTask(unitTaskName, rateResLog)
 
     # Truth: constant body rate, attitude integrated from the MRP kinematics.
     truthRate = np.array([0.02, -0.01, 0.015])
@@ -192,37 +192,32 @@ def stateUpdateRate(show_plots):
     stInMsg = messaging.STAttMsgF32()
     module.stAttInMsg.subscribeTo(stInMsg)
 
-    imuMessage = messaging.IMUSensorBodyMsgF32Payload()
-    imuInMsg = messaging.IMUSensorBodyMsgF32()
-    module.imuSensorBodyInMsg.subscribeTo(imuInMsg)
-
     np.random.seed(0)
     stSigma = module.stMeasurementNoiseStd
-    gyroSigma = module.gyroMeasurementNoiseStd
+    rateSigma = module.rateMeasurementNoiseStd
 
     unitTestSim.InitializeSimulation()
     for i in range(num_steps):
         stMessage.timeTag = time[i]
         stMessage.MRP_BdyInrtl = (truth[i, 1:4] + np.random.normal(0, stSigma, 3)).tolist()
-        imuMessage.AngVelBody = (truthRate + np.random.normal(0, gyroSigma, 3)).tolist()
+        stMessage.omega_BN_B = (truthRate + np.random.normal(0, rateSigma, 3)).tolist()
         if i > 5:
             stInMsg.write(stMessage, macros.sec2nano(time[i]))
-            imuInMsg.write(imuMessage, macros.sec2nano(time[i]))
         unitTestSim.ConfigureStopTime(macros.sec2nano(time[i + 1]))
         unitTestSim.ExecuteSimulation()
 
     stateLog = unitTestSupport.addTimeColumn(filterLog.times(), filterLog.state[:, :NUM_STATES])
     covarLog = unitTestSupport.addTimeColumn(filterLog.times(), filterLog.covar[:, :NUM_STATES ** 2])
 
-    # Star-tracker and gyro residuals (3 components each), pre- and post-fit.
+    # Star-tracker attitude and rate residuals (3 components each), pre- and post-fit.
     st_pre = unitTestSupport.addTimeColumn(stResLog.times(), stResLog.preFits[:, :3])
     st_post = unitTestSupport.addTimeColumn(stResLog.times(), stResLog.postFits[:, :3])
-    gyro_pre = unitTestSupport.addTimeColumn(gyroResLog.times(), gyroResLog.preFits[:, :3])
-    gyro_post = unitTestSupport.addTimeColumn(gyroResLog.times(), gyroResLog.postFits[:, :3])
+    rate_pre = unitTestSupport.addTimeColumn(rateResLog.times(), rateResLog.preFits[:, :3])
+    rate_post = unitTestSupport.addTimeColumn(rateResLog.times(), rateResLog.postFits[:, :3])
 
-    # Rate estimate must converge to the gyro rate.
+    # Rate estimate must converge to the measured rate.
     for i in range(3):
-        if abs(stateLog[-1, 4 + i] - truthRate[i]) > 5 * gyroSigma:
+        if abs(stateLog[-1, 4 + i] - truthRate[i]) > 5 * rateSigma:
             testFailCount += 1
             testMessages.append("Rate estimation failure")
     # Covariance diagonal must shrink below its initial value.
@@ -236,15 +231,15 @@ def stateUpdateRate(show_plots):
     # (a generous bound avoids false positives while still confirming convergence).
     half = len(st_post) // 2
     st_valid = np.array(stResLog.valid, dtype=bool)[half:]
-    gyro_valid = np.array(gyroResLog.valid, dtype=bool)[half:]
+    rate_valid = np.array(rateResLog.valid, dtype=bool)[half:]
     st_post_rms = np.sqrt(np.mean(st_post[half:, 1:4][st_valid] ** 2, axis=0))
-    gyro_post_rms = np.sqrt(np.mean(gyro_post[half:, 1:4][gyro_valid] ** 2, axis=0))
+    rate_post_rms = np.sqrt(np.mean(rate_post[half:, 1:4][rate_valid] ** 2, axis=0))
     if np.any(st_post_rms > 10 * stSigma):
         testFailCount += 1
         testMessages.append("Star-tracker post-fit residuals exceed 10-sigma noise: " + str(st_post_rms))
-    if np.any(gyro_post_rms > 10 * gyroSigma):
+    if np.any(rate_post_rms > 10 * rateSigma):
         testFailCount += 1
-        testMessages.append("Gyro post-fit residuals exceed 10-sigma noise: " + str(gyro_post_rms))
+        testMessages.append("Rate post-fit residuals exceed 10-sigma noise: " + str(rate_post_rms))
 
     if show_plots:
         diff = np.copy(stateLog)
@@ -253,8 +248,8 @@ def stateUpdateRate(show_plots):
         filter_plots.states(diff, 'Rate Update').show()
         filter_plots.post_fit_residuals(st_pre, stSigma, 'Star Tracker Pre-Fit').show()
         filter_plots.post_fit_residuals(st_post, stSigma, 'Star Tracker Post-Fit').show()
-        filter_plots.post_fit_residuals(gyro_pre, gyroSigma, 'Gyro Pre-Fit').show()
-        filter_plots.post_fit_residuals(gyro_post, gyroSigma, 'Gyro Post-Fit').show()
+        filter_plots.post_fit_residuals(rate_pre, rateSigma, 'Rate Pre-Fit').show()
+        filter_plots.post_fit_residuals(rate_post, rateSigma, 'Rate Post-Fit').show()
 
     if testFailCount == 0:
         print("PASSED: InertialFilter rate update")
@@ -264,9 +259,9 @@ def stateUpdateRate(show_plots):
 # Steps at which a gross outlier is mixed into the measurement stream. The two sensors are kept on
 # disjoint steps so each stream's perturbation is attributable to it alone.
 ST_OUTLIER_STEPS = (60, 130, 200, 270, 340)
-GYRO_OUTLIER_STEPS = (90, 170, 250, 330)
+RATE_OUTLIER_STEPS = (90, 170, 250, 330)
 ST_OUTLIER = np.array([0.3, -0.3, 0.3])     # [-] MRP offset added to a star-tracker sample
-GYRO_OUTLIER = np.array([0.5, 0.5, -0.5])   # [rad/s] offset added to a gyro sample
+RATE_OUTLIER = np.array([0.5, 0.5, -0.5])   # [rad/s] offset added to a rate sample
 
 
 def test_outlierRecovery(show_plots):
@@ -274,7 +269,7 @@ def test_outlierRecovery(show_plots):
 
 
 def outlierRecovery(show_plots):
-    """Track an MRP attitude profile with occasional gross star-tracker and gyro outliers, and check
+    """Track an MRP attitude profile with occasional gross star-tracker attitude and rate outliers, and check
     the filter has converged by the last step. The slow truth rate keeps |sigma| under one."""
     unitTaskName = "unitTask"
     unitProcessName = "TestProcess"
@@ -293,8 +288,8 @@ def outlierRecovery(show_plots):
     unitTestSim.AddModelToTask(unitTaskName, filterLog)
     stResLog = module.filterStResOutMsg.recorder()
     unitTestSim.AddModelToTask(unitTaskName, stResLog)
-    gyroResLog = module.filterGyroResOutMsg.recorder()
-    unitTestSim.AddModelToTask(unitTaskName, gyroResLog)
+    rateResLog = module.filterRateResOutMsg.recorder()
+    unitTestSim.AddModelToTask(unitTaskName, rateResLog)
 
     # Truth: constant body rate, attitude integrated from the MRP kinematics.
     truthRate = np.array([0.005, -0.003, 0.004])
@@ -306,13 +301,9 @@ def outlierRecovery(show_plots):
     stInMsg = messaging.STAttMsgF32()
     module.stAttInMsg.subscribeTo(stInMsg)
 
-    imuMessage = messaging.IMUSensorBodyMsgF32Payload()
-    imuInMsg = messaging.IMUSensorBodyMsgF32()
-    module.imuSensorBodyInMsg.subscribeTo(imuInMsg)
-
     np.random.seed(0)
     stSigma = module.stMeasurementNoiseStd
-    gyroSigma = module.gyroMeasurementNoiseStd
+    rateSigma = module.rateMeasurementNoiseStd
 
     # Nothing can fire on step 0: a time tag of 0 is not newer than the adapter's initial anchor.
     # Log index 0 is blank as well; from index 1 on, index k is loop step k.
@@ -324,25 +315,24 @@ def outlierRecovery(show_plots):
 
     # The measurement streams actually written, for the plots.
     st_meas = np.zeros([num_steps, 4])
-    gyro_meas = np.zeros([num_steps, 4])
+    rate_meas = np.zeros([num_steps, 4])
 
     unitTestSim.InitializeSimulation()
     for i in range(num_steps):
         stValue = truth[i, 1:4] + np.random.normal(0, stSigma, 3)
-        gyroValue = truthRate + np.random.normal(0, gyroSigma, 3)
+        rateValue = truthRate + np.random.normal(0, rateSigma, 3)
         if i in ST_OUTLIER_STEPS:
             stValue = stValue + ST_OUTLIER
-        if i in GYRO_OUTLIER_STEPS:
-            gyroValue = gyroValue + GYRO_OUTLIER
+        if i in RATE_OUTLIER_STEPS:
+            rateValue = rateValue + RATE_OUTLIER
         st_meas[i] = [macros.sec2nano(time[i]), *stValue]
-        gyro_meas[i] = [macros.sec2nano(time[i]), *gyroValue]
+        rate_meas[i] = [macros.sec2nano(time[i]), *rateValue]
 
         if i >= first_meas_step:
             stMessage.timeTag = time[i] + st_time_nudge
             stMessage.MRP_BdyInrtl = stValue.tolist()
+            stMessage.omega_BN_B = rateValue.tolist()
             stInMsg.write(stMessage, macros.sec2nano(time[i]))
-            imuMessage.AngVelBody = gyroValue.tolist()
-            imuInMsg.write(imuMessage, macros.sec2nano(time[i]))
         unitTestSim.ConfigureStopTime(macros.sec2nano(time[i + 1]))
         unitTestSim.ExecuteSimulation()
 
@@ -353,7 +343,7 @@ def outlierRecovery(show_plots):
     stateLog = stateLogAll[1:]
     covarLog = covarLogAll[1:]
     st_post = unitTestSupport.addTimeColumn(stResLog.times(), stResLog.postFits[:, :3])[1:]
-    gyro_post = unitTestSupport.addTimeColumn(gyroResLog.times(), gyroResLog.postFits[:, :3])[1:]
+    rate_post = unitTestSupport.addTimeColumn(rateResLog.times(), rateResLog.postFits[:, :3])[1:]
 
     np.testing.assert_equal(len(stateLog), num_steps,
                             err_msg='log length does not match the step count')
@@ -362,7 +352,7 @@ def outlierRecovery(show_plots):
     rateErr = np.linalg.norm(stateLog[:, 4:7] - truthRate, axis=1)
     # Reference level for the error_recovery figures: the accuracy before any outlier lands.
     attBaseline = float(np.median(attErr[30:min(ST_OUTLIER_STEPS)]))
-    rateBaseline = float(np.median(rateErr[30:min(GYRO_OUTLIER_STEPS)]))
+    rateBaseline = float(np.median(rateErr[30:min(RATE_OUTLIER_STEPS)]))
 
     if show_plots:
         truth_ns = truth[:, 0] * 1.0E9
@@ -376,20 +366,20 @@ def outlierRecovery(show_plots):
         rate_err_col = np.column_stack([stateLog[:, 0], rateErr])
         filter_plots.outlier_rejection(st_meas[first_meas_step:], truth_mrp,
                                        used[first_meas_step:], 'Star Tracker Outliers').show()
-        filter_plots.outlier_rejection(gyro_meas[first_meas_step:], truth_rate_profile,
-                                       used[first_meas_step:], 'Gyro Outliers').show()
+        filter_plots.outlier_rejection(rate_meas[first_meas_step:], truth_rate_profile,
+                                       used[first_meas_step:], 'Rate Outliers').show()
         filter_plots.error_recovery(att_err_col, ST_OUTLIER_STEPS, attBaseline, 'Attitude').show()
-        filter_plots.error_recovery(rate_err_col, GYRO_OUTLIER_STEPS, rateBaseline, 'Rate').show()
+        filter_plots.error_recovery(rate_err_col, RATE_OUTLIER_STEPS, rateBaseline, 'Rate').show()
         filter_plots.state_covar(stateLog, covarLog, 'Outlier Recovery').show()
         filter_plots.states(diff, 'Outlier Recovery').show()
         filter_plots.post_fit_residuals(st_post, stSigma, 'Star Tracker Post-Fit').show()
-        filter_plots.post_fit_residuals(gyro_post, gyroSigma, 'Gyro Post-Fit').show()
+        filter_plots.post_fit_residuals(rate_post, rateSigma, 'Rate Post-Fit').show()
 
     # Tolerances are multiples of the measurement noise so they follow the tuning; covariance is
     # checked on the trace because an individual block can end above its seeded value.
     np.testing.assert_allclose(stateLog[-1, 1:4], truth[-1, 1:4], atol=5 * stSigma,
                                err_msg='attitude not converged at the last step', verbose=True)
-    np.testing.assert_allclose(stateLog[-1, 4:7], truthRate, atol=5 * gyroSigma,
+    np.testing.assert_allclose(stateLog[-1, 4:7], truthRate, atol=5 * rateSigma,
                                err_msg='rate not converged at the last step', verbose=True)
     covarTrace = sum(covarLog[-1, i * NUM_STATES + i + 1] for i in range(NUM_STATES))
     covarTrace0 = sum(covarLogAll[0, i * NUM_STATES + i + 1] for i in range(NUM_STATES))
@@ -479,8 +469,8 @@ def delayedMeasurement(show_plots):
     anchor had been dragged forward by the gap's propagation, a measurement time-stamped
     before the call time would be dropped instead of applied.
 
-    Star-tracker only (no gyro): the body rate stays at its initial value, so the attitude
-    propagates along the known truth and the propagation is directly observable."""
+    Every star-tracker payload carries the truth rate, so the rate state stays put and the
+    attitude propagates along the known truth, making the propagation directly observable."""
     testFailCount = 0
     testMessages = []
 
@@ -497,9 +487,9 @@ def delayedMeasurement(show_plots):
 
     def run_scenario(deliver_step):
         """Run phase-1 convergence, then deliver the single time[meas_idx] star-tracker
-        measurement at step `deliver_step` (always stamped at time[meas_idx]). Star-tracker
-        only (no gyro): the body rate stays at its initial value, so the attitude propagates
-        along the known truth. Returns (stateLog, covarLog, st_valid)."""
+        measurement at step `deliver_step` (always stamped at time[meas_idx]). The payload
+        carries the truth rate, so the rate state stays put and the attitude propagates along
+        the known truth. Returns (stateLog, covarLog, st_valid)."""
         unitTestSim = SimulationBaseClass.SimBaseClass()
         testProc = unitTestSim.CreateNewProcess("TestProcess")
         testProc.addTask(unitTestSim.CreateNewTask("unitTask", macros.sec2nano(dt)))
@@ -517,6 +507,7 @@ def delayedMeasurement(show_plots):
         unitTestSim.AddModelToTask("unitTask", stResLog)
 
         stMessage = messaging.STAttMsgF32Payload()
+        stMessage.omega_BN_B = truthRate.tolist()
         stInMsg = messaging.STAttMsgF32()
         module.stAttInMsg.subscribeTo(stInMsg)
 

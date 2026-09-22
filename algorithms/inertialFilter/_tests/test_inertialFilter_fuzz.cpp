@@ -48,13 +48,13 @@ InertialFilterConfig makeConfig(double alpha,
                                 double pRate,
                                 double q,
                                 double stStd,
-                                double gyroStd,
+                                double rateStd,
                                 State const& initial) {
     Eigen::Matrix<double, 6, 1> diag;
     diag << pAtt, pAtt, pAtt, pRate, pRate, pRate;
     Matrix6 const initialCovariance = diag.asDiagonal();
     Matrix6 const processNoise = q * Matrix6::Identity();
-    return InertialFilterConfig::create(alpha, beta, processNoise, initial, initialCovariance, stStd, gyroStd);
+    return InertialFilterConfig::create(alpha, beta, processNoise, initial, initialCovariance, stStd, rateStd);
 }
 
 bool finiteSymmetricPsd(Matrix6 const& P) {
@@ -82,7 +82,7 @@ void fuzzTimeAndMeasurementUpdates(double alpha,
                                    double pRate,
                                    double q,
                                    double stStd,
-                                   double gyroStd,
+                                   double rateStd,
                                    double s0x,
                                    double s0y,
                                    double s0z,
@@ -97,7 +97,7 @@ void fuzzTimeAndMeasurementUpdates(double alpha,
                                    double mwz,
                                    double dt) {
     InertialFilterAlgorithm algo(
-        makeConfig(alpha, beta, pAtt, pRate, q, stStd, gyroStd, makeState({s0x, s0y, s0z}, {w0x, w0y, w0z})));
+        makeConfig(alpha, beta, pAtt, pRate, q, stStd, rateStd, makeState({s0x, s0y, s0z}, {w0x, w0y, w0z})));
 
     Eigen::Vector3d const stObservation(msx, msy, msz);
     Eigen::Vector3d const rateObservation(mwx, mwy, mwz);
@@ -125,7 +125,7 @@ void fuzzTimeAndMeasurementUpdates(double alpha,
         << "attitude should move toward the ST measurement (within the UKF MRP sigma-point bias)";
     EXPECT_LE(attitudeTrace(afterSt), attTracePrior + kTol) << "attitude covariance should shrink";
 
-    // ---- gyro rate update (re-populate sigma points around the ST posterior first) ----
+    // ---- rate update (re-populate sigma points around the ST posterior first) ----
     ASSERT_TRUE(algo.timeUpdate(0.0)) << "zero-dt timeUpdate should be valid";
     Eigen::Vector3d const ratePrior = algo.getState().get<filtering::AngularRate<3>>();
     double const rateErrorPrior = (rateObservation - ratePrior).norm();
@@ -134,7 +134,7 @@ void fuzzTimeAndMeasurementUpdates(double alpha,
     RateMeasurement r;
     r.timeTag = 1.0;
     r.omega_BN_B = rateObservation;
-    r.covar = (gyroStd * gyroStd) * Eigen::Matrix3d::Identity();
+    r.covar = (rateStd * rateStd) * Eigen::Matrix3d::Identity();
     r.valid = true;
     ASSERT_TRUE(algo.measurementUpdate(r)) << "rate measurementUpdate should be valid";
 
@@ -142,7 +142,7 @@ void fuzzTimeAndMeasurementUpdates(double alpha,
     EXPECT_TRUE(finiteSymmetricPsd(afterRate)) << "covariance after rate update";
     EXPECT_LE((rateObservation - algo.getState().get<filtering::AngularRate<3>>()).norm(),
               rateErrorPrior + kMoveTowardRelTol * std::sqrt(rateTracePrior) + kTol)
-        << "rate should move toward the gyro measurement (within the UKF sigma-point bias)";
+        << "rate should move toward the rate measurement (within the UKF sigma-point bias)";
     EXPECT_LE(rateTrace(afterRate), rateTracePrior + kTol) << "rate covariance should shrink";
 }
 FUZZ_TEST(InertialFilterFuzz, fuzzTimeAndMeasurementUpdates)
@@ -152,7 +152,7 @@ FUZZ_TEST(InertialFilterFuzz, fuzzTimeAndMeasurementUpdates)
                  fuzztest::InRange(1e-6, 1e-2),  // initial rate variance
                  fuzztest::InRange(0.0, 1e-4),   // process noise
                  fuzztest::InRange(1e-5, 1e-1),  // ST measurement noise std
-                 fuzztest::InRange(1e-5, 1e-1),  // gyro measurement noise std
+                 fuzztest::InRange(1e-5, 1e-1),  // rate measurement noise std
                  fuzztest::InRange(-0.3, 0.3),   // initial sigma x/y/z
                  fuzztest::InRange(-0.3, 0.3),
                  fuzztest::InRange(-0.3, 0.3),
