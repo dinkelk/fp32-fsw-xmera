@@ -15,7 +15,7 @@ from xmera.architecture import sim_model
 
 
 # this python function computes the same reference angle as the tested module
-def compute_rotation_angle(sigma_RN, rHat_SB_N, a1Hat_B, a2Hat_B, theta0):
+def compute_rotation_angle(sigma_RN, rHat_SB_N, a1Hat_B, a2Hat_B, priorThetaRef):
 
     RN = rbk.MRP2C(sigma_RN)
     rS_R = np.matmul(RN, rHat_SB_N)
@@ -33,8 +33,8 @@ def compute_rotation_angle(sigma_RN, rHat_SB_N, a1Hat_B, a2Hat_B, theta0):
         if np.dot(a1Hat_B, np.cross(a2Hat_B, a2_R)) < 0:
             theta = -theta
     else:
-        # wrap current theta0 to [-pi, pi]
-        theta = np.arctan2(np.sin(theta0), np.cos(theta0))
+        # no preferred rotation angle: hold the reference angle from the previous update
+        theta = np.arctan2(np.sin(priorThetaRef), np.cos(priorThetaRef))
 
     return theta
 
@@ -73,14 +73,13 @@ def test_solarArrayReference(show_plots, rHat_SB_N, sigma_BN, sigma_RN, accuracy
     - ``solarArrayRefOutMsg``
 
     in all its parts. The reference angle ``theta`` is checked versus the value computed by a python function that computes the same angle.
-    The reference angle derivative ``thetaDot`` is checked versus zero, as the module is run for only one Update call.
     """
     a1Hat_B = np.array([1, 0, 0])
     a2Hat_B = np.array([0, 1, 0])
     BN = rbk.MRP2C(sigma_BN)
     rHat_SB_B = np.matmul(BN, rHat_SB_N)
-    thetaC = 0
-    thetaDotC = 0
+    # the module starts with a zero retained reference angle
+    priorThetaRef = 0
 
     unit_task_name = "unitTask"
     unit_process_name = "TestProcess"
@@ -118,13 +117,6 @@ def test_solarArrayReference(show_plots, rHat_SB_N, sigma_BN, sigma_RN, accuracy
     att_ref_in_msg = messaging.AttRefMsgF32().write(att_ref_in_msg_data)
     solar_array.attRefInMsg.subscribeTo(att_ref_in_msg)
 
-    # Create input hinged rigid body body message
-    hinged_rigid_body_in_msg_data = messaging.HingedRigidBodyMsgF32Payload()
-    hinged_rigid_body_in_msg_data.theta = thetaC
-    hinged_rigid_body_in_msg_data.thetaDot = thetaDotC
-    hinged_rigid_body_in_msg = messaging.HingedRigidBodyMsgF32().write(hinged_rigid_body_in_msg_data)
-    solar_array.hingedRigidBodyInMsg.subscribeTo(hinged_rigid_body_in_msg)
-
     # Setup logging on the test module output message so that we get all the writes to it
     data_log = solar_array.solarArrayRefOutMsg.recorder()
     unit_test_sim.AddModelToTask(unit_task_name, data_log)
@@ -138,7 +130,7 @@ def test_solarArrayReference(show_plots, rHat_SB_N, sigma_BN, sigma_RN, accuracy
     # Begin the simulation time run set above
     unit_test_sim.ExecuteSimulation()
 
-    thetaR = compute_rotation_angle(sigma_RN, rHat_SB_N, a1Hat_B, a2Hat_B, thetaC)
+    thetaR = compute_rotation_angle(sigma_RN, rHat_SB_N, a1Hat_B, a2Hat_B, priorThetaRef)
 
     # compare the module results to the truth values
     np.testing.assert_allclose(data_log.theta[0], thetaR, atol=accuracy, rtol=accuracy)
@@ -150,15 +142,15 @@ def test_solarArrayReference(show_plots, rHat_SB_N, sigma_BN, sigma_RN, accuracy
     (-1.2, 0.0),
     (3.0, 0.0),
     (-3.0, 0.0),
-    (0.5, 0.3),     # offset shifts result
-    (2.0, 2.0),     # sum past pi -> wraps to negative
-    (-2.0, -2.0),   # sum past -pi -> wraps to positive
+    (0.5, 0.3),     # offset is ignored
+    (2.0, 2.0),     # offset is ignored
+    (-2.0, -2.0),   # offset is ignored
 ])
 @pytest.mark.parametrize("accuracy", [1e-6])
 def test_solarArrayReference_specifiedAngle(show_plots, specifiedAngle, offsetAngle, accuracy):
     r"""
-    Verifies that in SPECIFIED_ANGLE tracking mode the output reference angle equals
-    (specifiedAngle + offsetAngle) wrapped to [-pi, pi], regardless of attitude or sun inputs.
+    Verifies that in SPECIFIED_ANGLE tracking mode the output reference angle equals specifiedAngle
+    wrapped to [-pi, pi], regardless of attitude, sun inputs, or the configured offset angle.
     """
     a1Hat_B = np.array([1, 0, 0])
     a2Hat_B = np.array([0, 1, 0])
@@ -194,12 +186,6 @@ def test_solarArrayReference_specifiedAngle(show_plots, specifiedAngle, offsetAn
     att_ref_in_msg = messaging.AttRefMsgF32().write(att_ref_in_msg_data)
     solar_array.attRefInMsg.subscribeTo(att_ref_in_msg)
 
-    hinged_rigid_body_in_msg_data = messaging.HingedRigidBodyMsgF32Payload()
-    hinged_rigid_body_in_msg_data.theta = 0.0
-    hinged_rigid_body_in_msg_data.thetaDot = 0.0
-    hinged_rigid_body_in_msg = messaging.HingedRigidBodyMsgF32().write(hinged_rigid_body_in_msg_data)
-    solar_array.hingedRigidBodyInMsg.subscribeTo(hinged_rigid_body_in_msg)
-
     data_log = solar_array.solarArrayRefOutMsg.recorder()
     unit_test_sim.AddModelToTask(unit_task_name, data_log)
 
@@ -207,8 +193,7 @@ def test_solarArrayReference_specifiedAngle(show_plots, specifiedAngle, offsetAn
     unit_test_sim.ConfigureStopTime(macros.sec2nano(0.5))
     unit_test_sim.ExecuteSimulation()
 
-    summed = specifiedAngle + offsetAngle
-    expected = np.arctan2(np.sin(summed), np.cos(summed))
+    expected = np.arctan2(np.sin(specifiedAngle), np.cos(specifiedAngle))
     np.testing.assert_allclose(data_log.theta[0], expected, atol=accuracy, rtol=accuracy)
 
 

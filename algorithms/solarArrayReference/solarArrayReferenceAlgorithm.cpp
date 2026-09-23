@@ -7,24 +7,25 @@
 /*! @brief Construct the algorithm with a validated configuration. */
 SolarArrayReferenceAlgorithm::SolarArrayReferenceAlgorithm(const SolarArrayReferenceConfig& config) : cfg(config) {
     setConfig(config);
+    reInitialize();
 }
 
 /*! @brief Replace the algorithm's stored configuration at runtime. */
 void SolarArrayReferenceAlgorithm::setConfig(const SolarArrayReferenceConfig& config) { this->cfg = config; }
 
-/*! This method computes the updated rotation angle reference based on current attitude, reference attitude, and current
- rotation angle
+/*! @brief Reset the retained runtime state by zeroing the reference angle from the previous update. */
+void SolarArrayReferenceAlgorithm::reInitialize() { this->priorThetaRef = 0.0F; }
+
+/*! This method computes the updated rotation angle reference based on current attitude and reference attitude
  @return float
  @param sigma_BN body attitude MRP with respect to inertial frame
  @param sigma_RN reference attitude MRP with respect to inertial frame
  @param rHatIn_SB_B Sun pointing vector in body frame
- @param theta current panel angular displacement [rad]
 */
 float SolarArrayReferenceAlgorithm::update(
     const Eigen::Vector3f& sigma_BN,
     const Eigen::Vector3f& sigma_RN,  // NOLINT(bugprone-easily-swappable-parameters)
-    const Eigen::Vector3f& rHatIn_SB_B,
-    const float theta) const {
+    const Eigen::Vector3f& rHatIn_SB_B) {
     const Eigen::Vector3f& a1Hat_B = this->cfg.getDriveAxisHat_B();
     const Eigen::Vector3f& a2Hat_B = this->cfg.getSurfaceNormalHat_B();
     const Eigen::Vector3f& a3Hat_B = this->cfg.getThirdAxisHat_B();
@@ -46,9 +47,9 @@ float SolarArrayReferenceAlgorithm::update(
 
             /*! compute reference angle and store in output */
             if (sunDriveAngle < this->cfg.getAlignmentThreshold() || rHat_SB_B.stableNorm() == 0.0F) {
-                // sun direction is nearly parallel to drive axis, no preferred rotation angle so set reference to
-                // current angle
-                thetaRef = theta;
+                // sun direction is nearly parallel to drive axis, no preferred rotation angle so hold the reference
+                // angle from the previous update
+                thetaRef = this->priorThetaRef;
             } else {
                 /*! required solar array surface normal direction to align with Sun as well as possible */
                 thetaRef = safeAtan2f(a3Hat_B.dot(rHat_SB_B), a2Hat_B.dot(rHat_SB_B)) + this->cfg.getOffsetAngle();
@@ -56,12 +57,14 @@ float SolarArrayReferenceAlgorithm::update(
             break;
         }
         case TrackingMode::SPECIFIED_ANGLE: {
-            thetaRef = this->cfg.getSpecifiedArrayAngle() + this->cfg.getOffsetAngle();
+            thetaRef = this->cfg.getSpecifiedArrayAngle();
             break;
         }
     }
 
     const float thetaRefOut = safeAtan2f(safeSinf(thetaRef), safeCosf(thetaRef));
+
+    this->priorThetaRef = thetaRefOut;
 
     return thetaRefOut;
 }
