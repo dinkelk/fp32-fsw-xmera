@@ -13,10 +13,11 @@ extern "C" {
 /*!
  * @brief Enum indicating whether the anomaly angle is true anomaly or mean anomaly.
  *
- * The underlying type is fixed at uint8_t to match the Ada side's 8-bit Anomaly_Flag.
- * A plain C enum is int-width, which would read four bytes where Ada wrote one.
+ * A plain C enum, so it has the width of an int. The Ada side declares the
+ * matching field with the C version of its enumeration, which also has the
+ * width of an int.
  */
-typedef enum AnomalyType : uint8_t { TRUE_ANOMALY = 0, MEAN_ANOMALY = 1 } AnomalyType;
+typedef enum AnomalyType { TRUE_ANOMALY = 0, MEAN_ANOMALY = 1 } AnomalyType;
 
 /**
  * @brief POD representation of Cartesian state (position and velocity).
@@ -37,10 +38,10 @@ typedef struct {
  * reordering a field or changing anomalyFlag's width here silently misreads data rather
  * than failing to compile. The Ada binding's
  * Oe_Arc.C.U_C'Object_Size = getFitArcSizeBits() assert does not catch either case --
- * the seven bytes of padding after anomalyFlag absorb any width up to 64 bits, and a
- * size-preserving reorder leaves the total unchanged. That assert only catches a field
- * added or removed, or a double narrowed. The behavioural component tests are what
- * actually guard field order and flag width.
+ * the padding after anomalyFlag absorbs any width up to 64 bits, and a size-preserving
+ * reorder leaves the total unchanged. That assert only catches a field added or removed,
+ * or a double narrowed. The behavioural component tests are what actually guard field
+ * order and flag width.
  */
 typedef struct {
     unsigned int numberChebCoefficients;              /*!< [-] number of Chebyshev coefficients in the arc */

@@ -18,10 +18,10 @@ extern "C" {
  *
  * Numeric values must stay in lockstep with the C++ enum class in sunSearchPointAlgorithm.h.
  *
- * The underlying type is fixed at uint8_t to match the Ada side's 8-bit Rotation_Axis. A plain
- * C enum is int-width, which would read four bytes where Ada wrote one.
+ * A plain C enum, so it has the width of an int. The Ada side declares the matching field
+ * with the C version of its enumeration, which also has the width of an int.
  */
-typedef enum RotationAxis_c : uint8_t {
+typedef enum RotationAxis_c {
     ROTATION_AXIS_B1HAT_B_C = 0,
     ROTATION_AXIS_B2HAT_B_C = 1,
     ROTATION_AXIS_B3HAT_B_C = 2
@@ -35,9 +35,9 @@ typedef enum RotationAxis_c : uint8_t {
  *  - rotationAxis must be one of the RotationAxis_c values
  *
  * The rotations array crosses by reference, so the C++ side reads it at fixed offsets:
- * changing rotationAxis's width here silently misreads data rather than failing to compile.
- * The binding's count asserts do not catch it, because the padding after rotationAxis absorbs
- * any width up to 32 bits. The behavioural component tests are what guard the flag width.
+ * narrowing rotationAxis here silently misreads data rather than failing to compile. The
+ * binding's count asserts do not catch it, because padding would absorb a narrower width.
+ * The behavioural component tests are what guard the flag width.
  */
 typedef struct {
     float rotationDuration;      /*!< [s]    duration of this rotation */
