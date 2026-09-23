@@ -9,7 +9,8 @@ default ``AUTO_TRACK`` mode, :math:`\theta_R` is the angle that aligns the solar
 direction as well as possible (perfect incidence is achievable when the drive axis and the Sun direction are
 perpendicular). The module then adds an optional offset angle. In ``SPECIFIED_ANGLE`` mode, the module ignores the
 Sun direction and the offset angle, and outputs a user-supplied fixed angle. In both modes, the module wraps the
-result to :math:`[-\pi, \pi]`. All quantities are computed in single precision (float).
+result to :math:`[-\pi, \pi]` and keeps it as the fallback for the next update. All quantities are computed in
+single precision (float).
 
 Message Connection Descriptions
 -------------------------------
@@ -31,9 +32,6 @@ provides information on what this message is used for.
     * - attRefInMsg
       - :ref:`AttRefMsgF32Payload`
       - input attitude reference message containing :math:`\mathbf\sigma_{\mathcal{R}/\mathcal{N}}`
-    * - hingedRigidBodyInMsg
-      - :ref:`HingedRigidBodyMsgF32Payload`
-      - input hinged rigid body message containing the current panel angle :math:`\theta_C`
     * - solarArrayRefOutMsg
       - :ref:`MotorAngleRefMsgF32Payload`
       - output solar array reference message containing the reference angle :math:`\theta_R`
@@ -102,8 +100,8 @@ Module Assumptions and Limitations
 This module computes the rotation angle required to achieve the best incidence angle between the Sun direction and
 the solar array surface. This does not mean that perfect incidence (Sun direction perpendicular to array surface)
 is guaranteed: perfect incidence is only achievable when the drive axis and the Sun direction are perpendicular.
-Conversely, when they are parallel, no power generation is possible, and in that case the reference is set to the
-current panel angle to avoid pointless rotation.
+Conversely, when they are parallel, no power generation is possible, and in that case the module holds the
+reference angle computed by the previous update to avoid pointless rotation.
 
 The drive axis :math:`\hat{\mathbf a}_1` and surface normal :math:`\hat{\mathbf a}_2` are assumed to be fixed in the
 body frame. The Sun direction in body-frame components is extracted from ``attNavInMsg`` and is mapped into the
@@ -111,6 +109,10 @@ reference frame using the body and reference attitudes from ``attNavInMsg`` and 
 angle is computed in the frame that the spacecraft will occupy at the end of the active slew.
 
 The output reference angle :math:`\theta_R` is always wrapped to :math:`[-\pi, \pi]`.
+
+The module assumes that the array drive reaches the commanded reference angle between two updates. The reference
+angle :math:`\theta_R^-` from the previous update is therefore also the current panel angle, and the module uses
+it when the Sun gives no preferred rotation angle.
 
 Module Architecture
 -------------------
@@ -120,8 +122,10 @@ and converts between the single-precision message payloads and Eigen types at th
 two-phase initialization pattern: the configuration properties and message connections are set first, then
 ``reset()`` builds and validates the immutable ``SolarArrayReferenceConfig`` (canonicalizing the drive axis and
 surface normal into a right-handed orthonormal frame) and constructs the algorithm. An invalid parameter throws
-``fsw::invalid_argument`` at ``reset()``. A C shim (``solarArrayReferenceAlgorithm_c.h``) exposes the algorithm to
-Ada via ``extern "C"`` bindings.
+``fsw::invalid_argument`` at ``reset()``. The algorithm holds the reference angle from the previous update; a new
+algorithm starts at zero, and ``reInitialize()`` returns the retained angle to zero without rebuilding the
+configuration. A C shim (``solarArrayReferenceAlgorithm_c.h``) exposes the algorithm to Ada via ``extern "C"``
+bindings.
 
 Initialization
 --------------
@@ -137,7 +141,6 @@ configured by::
 
     module.attNavInMsg.subscribeTo(att_nav_msg)
     module.attRefInMsg.subscribeTo(att_ref_msg)
-    module.hingedRigidBodyInMsg.subscribeTo(hinged_rigid_body_msg)
 
 For ``AUTO_TRACK`` mode (the default), no further configuration is required. To use ``SPECIFIED_ANGLE`` mode::
 
@@ -180,8 +183,8 @@ At every update cycle, the ``solarArrayReference`` module performs the following
       \alpha = \arccos\!\left( \left|\, {}^\mathcal{R}\hat{\mathbf r}_S \cdot \hat{\mathbf a}_1\, \right| \right)
 
    If :math:`\alpha < \epsilon_a` (or the Sun direction is the zero vector), the Sun is aligned with the drive axis
-   and there is no preferred rotation: set :math:`\theta_R = \theta_C` (the current panel angle from
-   ``hingedRigidBodyInMsg``, with no offset applied) and skip to the wrap in step 5.
+   and there is no preferred rotation: set :math:`\theta_R = \theta_R^-` (the reference angle from the previous
+   update, with no offset applied) and skip to the wrap in step 5.
 
 4. **Compute reference angle** (Sun not aligned with drive axis): expressed in the body-fixed orthonormal frame
    :math:`\{\hat{\mathbf a}_1,\, \hat{\mathbf a}_2,\, \hat{\mathbf a}_3\}` with
@@ -219,10 +222,18 @@ directly. Adding the offset can push the sum outside this range, so the final
 
 When the Sun direction is (nearly) aligned with the drive axis, its projection onto the :math:`(\hat{\mathbf a}_2,
 \hat{\mathbf a}_3)` plane vanishes and :math:`\theta_R` is undefined. The module detects this via the
-``alignmentThreshold`` check and falls back to returning the current panel angle :math:`\theta_C` directly,
-without applying the offset (the offset is meaningful only against the Sun-tracking solution). Because the wrap is
-applied unconditionally at the end, this also normalizes :math:`\theta_C` (which the caller may have provided
-unwrapped) to :math:`[-\pi, \pi]`.
+``alignmentThreshold`` check and falls back to the reference angle :math:`\theta_R^-` from the previous update,
+without applying the offset (the offset is meaningful only against the Sun-tracking solution). The array therefore
+stays where the last valid solution put it, instead of rotating to an arbitrary angle.
+
+Retained Reference Angle
+^^^^^^^^^^^^^^^^^^^^^^^^
+At the end of every update, in both tracking modes, the module stores the wrapped output :math:`\theta_R` as
+:math:`\theta_R^-`. This is the only runtime state the module holds, and step 3 is its only consumer. The stored
+value is always in :math:`[-\pi, \pi]`, because the module stores the output after the wrap.
+
+The state starts at zero, so an aligned Sun on the first update gives :math:`\theta_R = 0`. ``reset()`` builds a
+new algorithm and thus returns the state to zero. ``reInitialize()`` returns the state to zero without a rebuild.
 
 Specified Angle Mode
 ^^^^^^^^^^^^^^^^^^^^

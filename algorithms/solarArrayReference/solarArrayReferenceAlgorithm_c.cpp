@@ -65,14 +65,15 @@ void SolarArrayReferenceAlgorithm_setConfig(SolarArrayReferenceAlgorithmHandle* 
         configFromC(*driveAxis, *surfaceNormal, alignmentThreshold, trackingMode, specifiedArrayAngle, offsetAngle));
 }
 
-float SolarArrayReferenceAlgorithm_update(const SolarArrayReferenceAlgorithmHandle* self,
+void SolarArrayReferenceAlgorithm_reInitialize(SolarArrayReferenceAlgorithmHandle* self) {
+    fsw::fromHandle<::SolarArrayReferenceAlgorithm>(self)->reInitialize();
+}
+
+float SolarArrayReferenceAlgorithm_update(SolarArrayReferenceAlgorithmHandle* self,
                                           const Vector3f_c sigma_BN,
                                           const Vector3f_c sigma_RN,
-                                          const Vector3f_c rHatIn_SB_B,
-                                          const float theta) {
-    return fsw::fromHandle<const ::SolarArrayReferenceAlgorithm>(self)->update(
-        cArrayToEigenVector3<float>(sigma_BN.data),
-        cArrayToEigenVector3<float>(sigma_RN.data),
-        cArrayToEigenVector3<float>(rHatIn_SB_B.data),
-        theta);
+                                          const Vector3f_c rHatIn_SB_B) {
+    return fsw::fromHandle<::SolarArrayReferenceAlgorithm>(self)->update(cArrayToEigenVector3<float>(sigma_BN.data),
+                                                                         cArrayToEigenVector3<float>(sigma_RN.data),
+                                                                         cArrayToEigenVector3<float>(rHatIn_SB_B.data));
 }

@@ -126,22 +126,22 @@ class SolarArrayReferenceConfig final {
 
 /*! @brief Pure algorithm for computing solar array rotation reference angles.
  *
- * Computes the optimal solar array rotation angle to maximize solar incidence,
- * and estimates the rotation rate via finite differences.
+ * Computes the optimal solar array rotation angle to maximize solar incidence. The reference angle from the
+ * previous update is retained, because it is the fallback when the Sun is aligned with the drive axis and no
+ * rotation angle is preferred.
  */
 class SolarArrayReferenceAlgorithm final {
    public:
     explicit SolarArrayReferenceAlgorithm(const SolarArrayReferenceConfig& config);
 
     void setConfig(const SolarArrayReferenceConfig& config);
+    void reInitialize();
 
-    float update(const Eigen::Vector3f& sigma_BN,
-                 const Eigen::Vector3f& sigma_RN,
-                 const Eigen::Vector3f& rHatIn_SB_B,
-                 float theta) const;
+    float update(const Eigen::Vector3f& sigma_BN, const Eigen::Vector3f& sigma_RN, const Eigen::Vector3f& rHatIn_SB_B);
 
    private:
     SolarArrayReferenceConfig cfg;  //!< [-] validated configuration
+    float priorThetaRef{};          //!< [rad] reference angle computed by the previous update
 };
 
 #endif  // F32XMERA_SOLAR_ARRAY_REFERENCE_ALGORITHM_H

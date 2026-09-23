@@ -17,7 +17,7 @@ inline float referenceUpdate(const Eigen::Vector3f& sigma_BN,
                              const Eigen::Vector3f& a2Hat_B,
                              float alignmentThreshold,
                              float offsetAngle,
-                             float theta) {
+                             float priorThetaRef) {
     const Eigen::Vector3f rHat_SB_Bc = rHatIn_SB_B.stableNormalized();
     const Eigen::Matrix3f dcm_BN = mrpToDcm(sigma_BN);
     const Eigen::Matrix3f dcm_RN = mrpToDcm(sigma_RN);
@@ -33,8 +33,8 @@ inline float referenceUpdate(const Eigen::Vector3f& sigma_BN,
 
     float thetaRef{};
     if (sunDriveAngle < alignmentThreshold || rHat_SB_R.stableNorm() == 0.0F) {
-        // sun aligned with drive axis: keep current angle (offset is not applied; wrap happens below)
-        thetaRef = theta;
+        // sun aligned with drive axis: hold the previous reference angle (offset is not applied; wrap happens below)
+        thetaRef = priorThetaRef;
     } else {
         // Extract the array angle from the sun direction's (a2, a3) components; atan2 is well-conditioned for all
         // geometries, matching the algorithm's own computation.
@@ -42,6 +42,15 @@ inline float referenceUpdate(const Eigen::Vector3f& sigma_BN,
     }
 
     return atan2f(sinf(thetaRef), cosf(thetaRef));
+}
+
+// Sun direction that produces a reference angle of exactly `angle` for the given array frame. It lies in the
+// (a2, a3) plane, so it never triggers the drive-axis alignment fallback (except at a threshold of exactly pi/2).
+inline Eigen::Vector3f sunDirectionForAngle(const Eigen::Vector3f& a1Hat_B,
+                                            const Eigen::Vector3f& a2Hat_B,
+                                            float angle) {
+    const Eigen::Vector3f a3Hat_B = a1Hat_B.cross(a2Hat_B);
+    return (cosf(angle) * a2Hat_B) + (sinf(angle) * a3Hat_B);
 }
 
 // Build an algorithm from individual parameters via the validated configuration.
@@ -66,7 +75,7 @@ inline void regressionTestSolarArrayReference(std::vector<float> sigma_BN_Vec,
                                               std::vector<float> a1Hat_B_Vec,
                                               std::vector<float> a2Hat_B_Vec,
                                               float alignmentThreshold,
-                                              float theta) {
+                                              float priorAngle) {
     Eigen::Vector3f a1Hat_B_f(a1Hat_B_Vec[0], a1Hat_B_Vec[1], a1Hat_B_Vec[2]);
     Eigen::Vector3f a2Hat_B_f(a2Hat_B_Vec[0], a2Hat_B_Vec[1], a2Hat_B_Vec[2]);
 
@@ -94,9 +103,23 @@ inline void regressionTestSolarArrayReference(std::vector<float> sigma_BN_Vec,
         SolarArrayAxes{a1Hat_B_f, a2Hat_B_f}, alignmentThreshold, TrackingMode::AUTO_TRACK, 0.0F, 0.0F);
     SolarArrayReferenceAlgorithm alg{cfg};
 
+    // Drive the retained state to a non-trivial value, and mirror that step in the reference implementation.
+    const Eigen::Vector3f primingSun =
+        sunDirectionForAngle(cfg.getDriveAxisHat_B(), cfg.getSurfaceNormalHat_B(), priorAngle);
+    const float algorithmPrior = alg.update(Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero(), primingSun);
+    const float referencePrior = referenceUpdate(Eigen::Vector3f::Zero(),
+                                                 Eigen::Vector3f::Zero(),
+                                                 primingSun,
+                                                 cfg.getDriveAxisHat_B(),
+                                                 cfg.getSurfaceNormalHat_B(),
+                                                 cfg.getAlignmentThreshold(),
+                                                 cfg.getOffsetAngle(),
+                                                 0.0F);
+    EXPECT_NEAR(algorithmPrior, referencePrior, 1e-5F);
+
     // Call algorithm
     float result{};
-    EXPECT_NO_THROW(result = alg.update(sigma_BN_f, sigma_RN_f, rHatIn_SB_B_f, theta));
+    EXPECT_NO_THROW(result = alg.update(sigma_BN_f, sigma_RN_f, rHatIn_SB_B_f));
 
     // Compute reference using the config-canonicalized axes (matching what the algorithm uses internally)
     float reference = referenceUpdate(sigma_BN_f,
@@ -106,7 +129,7 @@ inline void regressionTestSolarArrayReference(std::vector<float> sigma_BN_Vec,
                                       cfg.getSurfaceNormalHat_B(),
                                       cfg.getAlignmentThreshold(),
                                       cfg.getOffsetAngle(),
-                                      theta);
+                                      referencePrior);
 
     float tol = 1e-5F;
     float tolerance = tol + fabsf(reference) * tol;
@@ -126,19 +149,24 @@ inline void propertyOutputIsFinite(std::vector<float> sigma_BN_Vec,
                                    std::vector<float> sigma_RN_Vec,
                                    std::vector<float> rHatIn_SB_B_Vec,
                                    float alignmentThreshold,
-                                   float theta) {
+                                   float priorAngle) {
     Eigen::Vector3f rHatIn_SB_B_f(rHatIn_SB_B_Vec[0], rHatIn_SB_B_Vec[1], rHatIn_SB_B_Vec[2]);
     if (rHatIn_SB_B_f.norm() < 1e-6F) {
         return;
     }
 
-    const SolarArrayReferenceAlgorithm alg = makeSolarArrayReferenceAlgorithm(
-        Eigen::Vector3f{1.0F, 0.0F, 0.0F}, Eigen::Vector3f{0.0F, 1.0F, 0.0F}, alignmentThreshold);
+    const Eigen::Vector3f a1Hat_B{1.0F, 0.0F, 0.0F};
+    const Eigen::Vector3f a2Hat_B{0.0F, 1.0F, 0.0F};
+    SolarArrayReferenceAlgorithm alg = makeSolarArrayReferenceAlgorithm(a1Hat_B, a2Hat_B, alignmentThreshold);
 
     Eigen::Vector3f sigma_BN(sigma_BN_Vec[0], sigma_BN_Vec[1], sigma_BN_Vec[2]);
     Eigen::Vector3f sigma_RN(sigma_RN_Vec[0], sigma_RN_Vec[1], sigma_RN_Vec[2]);
 
-    float result = alg.update(sigma_BN, sigma_RN, rHatIn_SB_B_f, theta);
+    const float priorResult = alg.update(
+        Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero(), sunDirectionForAngle(a1Hat_B, a2Hat_B, priorAngle));
+    EXPECT_TRUE(std::isfinite(priorResult));
+
+    float result = alg.update(sigma_BN, sigma_RN, rHatIn_SB_B_f);
     EXPECT_TRUE(std::isfinite(result));
 }
 
@@ -146,19 +174,18 @@ inline void propertyOutputIsFinite(std::vector<float> sigma_BN_Vec,
 inline void propertySpecifiedAngleReturnsAngle(std::vector<float> sigma_BN_Vec,
                                                std::vector<float> sigma_RN_Vec,
                                                std::vector<float> rHatIn_SB_B_Vec,
-                                               float specifiedAngle,
-                                               float theta) {
+                                               float specifiedAngle) {
     Eigen::Vector3f sigma_BN(sigma_BN_Vec[0], sigma_BN_Vec[1], sigma_BN_Vec[2]);
     Eigen::Vector3f sigma_RN(sigma_RN_Vec[0], sigma_RN_Vec[1], sigma_RN_Vec[2]);
     Eigen::Vector3f rHatIn_SB_B(rHatIn_SB_B_Vec[0], rHatIn_SB_B_Vec[1], rHatIn_SB_B_Vec[2]);
 
-    const SolarArrayReferenceAlgorithm alg = makeSolarArrayReferenceAlgorithm(Eigen::Vector3f{1.0F, 0.0F, 0.0F},
-                                                                              Eigen::Vector3f{0.0F, 1.0F, 0.0F},
-                                                                              1e-3F,
-                                                                              TrackingMode::SPECIFIED_ANGLE,
-                                                                              specifiedAngle);
+    SolarArrayReferenceAlgorithm alg = makeSolarArrayReferenceAlgorithm(Eigen::Vector3f{1.0F, 0.0F, 0.0F},
+                                                                        Eigen::Vector3f{0.0F, 1.0F, 0.0F},
+                                                                        1e-3F,
+                                                                        TrackingMode::SPECIFIED_ANGLE,
+                                                                        specifiedAngle);
 
-    float result = alg.update(sigma_BN, sigma_RN, rHatIn_SB_B, theta);
+    float result = alg.update(sigma_BN, sigma_RN, rHatIn_SB_B);
 
     // expected output is the specified angle wrapped to [-pi, pi]
     float expected = atan2f(sinf(specifiedAngle), cosf(specifiedAngle));
@@ -166,10 +193,10 @@ inline void propertySpecifiedAngleReturnsAngle(std::vector<float> sigma_BN_Vec,
     EXPECT_TRUE(std::isfinite(result));
 }
 
-// When sun is aligned with drive axis, output equals input theta.
-inline void propertyAlignedSunReturnsCurrentTheta(std::vector<float> a1Hat_B_Vec,
-                                                  float alignmentThreshold,
-                                                  float theta) {
+// When sun is aligned with drive axis, output equals the reference angle from the previous update.
+inline void propertyAlignedSunReturnsPriorThetaRef(std::vector<float> a1Hat_B_Vec,
+                                                   float alignmentThreshold,
+                                                   float priorAngle) {
     Eigen::Vector3f a1Hat_B_f(a1Hat_B_Vec[0], a1Hat_B_Vec[1], a1Hat_B_Vec[2]);
     if (fabsf(a1Hat_B_f.norm() - 1.0F) > 1e-3F) {
         return;
@@ -187,11 +214,16 @@ inline void propertyAlignedSunReturnsCurrentTheta(std::vector<float> a1Hat_B_Vec
         SolarArrayAxes{a1Hat_B_f, a2}, alignmentThreshold, TrackingMode::AUTO_TRACK, 0.0F, 0.0F);
     SolarArrayReferenceAlgorithm alg{cfg};
 
+    // Drive the retained reference angle to a known value before the aligned-sun call.
+    const Eigen::Vector3f primingSun =
+        sunDirectionForAngle(cfg.getDriveAxisHat_B(), cfg.getSurfaceNormalHat_B(), priorAngle);
+    const float priorThetaRef = alg.update(Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero(), primingSun);
+
     // Sun direction exactly along drive axis (use the config-canonicalized axis to match the algorithm)
     Eigen::Vector3f sunAligned = cfg.getDriveAxisHat_B();
 
-    float result = alg.update(Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero(), sunAligned, theta);
-    EXPECT_NEAR(result, atan2f(sinf(theta), cosf(theta)), 1e-5F);
+    float result = alg.update(Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero(), sunAligned);
+    EXPECT_NEAR(result, priorThetaRef, 1e-5F);
 }
 
 #endif  // TEST_SOLARARRAYREFERENCE_H

@@ -83,19 +83,23 @@ void SolarArrayReferenceAlgorithm_setConfig(SolarArrayReferenceAlgorithmHandle* 
                                             float offsetAngle);
 
 /**
+ * @brief Reset the retained runtime state (zero the reference angle from the previous update).
+ * @param self Pointer to the instance.
+ */
+void SolarArrayReferenceAlgorithm_reInitialize(SolarArrayReferenceAlgorithmHandle* self);
+
+/**
  * @brief Run the update step.
  * @param self        Pointer to the instance.
  * @param sigma_BN    Body attitude MRP relative to inertial frame.
  * @param sigma_RN    Reference attitude MRP relative to inertial frame.
  * @param rHatIn_SB_B Sun pointing vector in body frame.
- * @param theta       Current panel angular displacement [rad].
  * @return float  Updated reference array angle wrapped to [-pi, pi] [rad].
  */
-float SolarArrayReferenceAlgorithm_update(const SolarArrayReferenceAlgorithmHandle* self,
+float SolarArrayReferenceAlgorithm_update(SolarArrayReferenceAlgorithmHandle* self,
                                           Vector3f_c sigma_BN,
                                           Vector3f_c sigma_RN,
-                                          Vector3f_c rHatIn_SB_B,
-                                          float theta);
+                                          Vector3f_c rHatIn_SB_B);
 
 #ifdef __cplusplus
 }  // extern "C"
