@@ -7,9 +7,9 @@ Executive Summary
 This module computes the reference rotation angle :math:`\theta_R` for a single-axis solar array drive. In the
 default ``AUTO_TRACK`` mode, :math:`\theta_R` is the angle that aligns the solar array surface normal with the Sun
 direction as well as possible (perfect incidence is achievable when the drive axis and the Sun direction are
-perpendicular). In ``SPECIFIED_ANGLE`` mode, the module ignores the Sun direction and outputs a user-supplied fixed
-angle. In both modes, an optional offset angle is added before the result is wrapped to :math:`[-\pi, \pi]`. All
-quantities are computed in single precision (float).
+perpendicular). The module then adds an optional offset angle. In ``SPECIFIED_ANGLE`` mode, the module ignores the
+Sun direction and the offset angle, and outputs a user-supplied fixed angle. In both modes, the module wraps the
+result to :math:`[-\pi, \pi]`. All quantities are computed in single precision (float).
 
 Message Connection Descriptions
 -------------------------------
@@ -93,7 +93,8 @@ The following table lists all the module parameters than can be set. The paramet
       - float
       - [rad]
       - 0
-      - Offset added to the computed reference angle before wrapping
+      - Offset added to the Sun-tracking reference angle in ``AUTO_TRACK`` mode. Not applied in
+        ``SPECIFIED_ANGLE`` mode.
       - Must be in :math:`[-\pi, \pi]` (validated at reset())
 
 Module Assumptions and Limitations
@@ -161,7 +162,8 @@ At every update cycle, the ``solarArrayReference`` module performs the following
 1. **Select tracking mode**:
 
    - If ``trackingMode`` is ``AUTO_TRACK``, compute :math:`\theta_R` from the Sun direction (steps 2-4).
-   - If ``trackingMode`` is ``SPECIFIED_ANGLE``, set :math:`\theta_R = \theta_{\text{specified}}` and skip to step 5.
+   - If ``trackingMode`` is ``SPECIFIED_ANGLE``, set :math:`\theta_R = \theta_{\text{specified}}` and skip to the
+     wrap in step 5.
 
 2. **Map Sun direction to reference frame**: normalize the body-frame Sun direction
    :math:`{}^{\mathcal{B}_C}\hat{\mathbf r}_S` (using ``stableNormalized``), then map it into the reference frame
@@ -199,14 +201,14 @@ At every update cycle, the ``solarArrayReference`` module performs the following
    so no explicit projection/normalization is required. :math:`\hat{\mathbf a}_3` is computed once when the
    configuration is built and cached.
 
-5. **Apply offset and wrap**: when the Sun was not aligned with the drive axis (and in ``SPECIFIED_ANGLE`` mode),
-   add the configured offset angle. In all cases, wrap the result to :math:`[-\pi, \pi]`:
+5. **Apply offset and wrap**: in ``AUTO_TRACK`` mode, if the Sun is not aligned with the drive axis, add the
+   offset angle. In all cases, wrap the result to :math:`[-\pi, \pi]`:
 
    .. math::
 
       \theta_R \leftarrow \operatorname{atan2}\!\left( \sin(\theta_R + \theta_{\text{offset}}),\, \cos(\theta_R + \theta_{\text{offset}}) \right)
 
-   In the Sun-aligned fallback the offset is intentionally not applied — only the wrap step is performed.
+   In the Sun-aligned fallback and in ``SPECIFIED_ANGLE`` mode, the module does only the wrap step.
 
 Wrapping and the Sun-Aligned Case
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -225,12 +227,14 @@ unwrapped) to :math:`[-\pi, \pi]`.
 Specified Angle Mode
 ^^^^^^^^^^^^^^^^^^^^
 In ``SPECIFIED_ANGLE`` mode the module bypasses the Sun-tracking computation entirely and returns the
-user-supplied ``specifiedArrayAngle``. The offset angle and the final :math:`[-\pi, \pi]` wrap are still applied,
-so:
+user-supplied ``specifiedArrayAngle``. The module does not add the offset angle, because the offset is meaningful
+only against the Sun-tracking solution. The module still applies the final :math:`[-\pi, \pi]` wrap, so:
 
 .. math::
 
-   \theta_R = \operatorname{atan2}\!\left( \sin(\theta_{\text{specified}} + \theta_{\text{offset}}),\, \cos(\theta_{\text{specified}} + \theta_{\text{offset}}) \right)
+   \theta_R = \operatorname{atan2}\!\left( \sin(\theta_{\text{specified}}),\, \cos(\theta_{\text{specified}}) \right)
+
+Because ``specifiedArrayAngle`` is validated to :math:`[-\pi, \pi]`, the wrap does not change the value.
 
 This mode is useful for parking the array at a known orientation (e.g. during slews or eclipse) without depending
 on a valid Sun direction measurement.

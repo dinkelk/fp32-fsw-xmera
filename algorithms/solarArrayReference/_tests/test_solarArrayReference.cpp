@@ -246,8 +246,8 @@ TEST(SolarArrayReferenceTest, OffsetAngleAppliedAutoTrack) {
     EXPECT_NEAR(resultWithOffset, 0.4F, 1e-5F);
 }
 
-// Offset angle is added to the SPECIFIED_ANGLE result and the sum is wrapped to [-pi, pi].
-TEST(SolarArrayReferenceTest, OffsetAngleAppliedSpecifiedAngle) {
+// Offset angle is not applied in SPECIFIED_ANGLE mode.
+TEST(SolarArrayReferenceTest, OffsetAngleIgnoredSpecifiedAngle) {
     const auto alg = makeSolarArrayReferenceAlgorithm(Eigen::Vector3f{1.0F, 0.0F, 0.0F},
                                                       Eigen::Vector3f{0.0F, 1.0F, 0.0F},
                                                       1e-3F,
@@ -257,21 +257,21 @@ TEST(SolarArrayReferenceTest, OffsetAngleAppliedSpecifiedAngle) {
 
     float result =
         alg.update(Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero(), Eigen::Vector3f{1.0F, 0.0F, 0.0F}, 0.0F);
-    // Expected: wrap(0.5 + 0.2) = 0.7
-    EXPECT_NEAR(result, 0.7F, 1e-5F);
+    EXPECT_NEAR(result, 0.5F, 1e-5F);
 }
 
-// Offset angle that pushes the sum past pi wraps correctly to the negative side.
+// Offset angle that pushes the AUTO_TRACK sum past pi wraps correctly to the negative side.
 TEST(SolarArrayReferenceTest, OffsetAngleWrapsPastPi) {
     const auto alg = makeSolarArrayReferenceAlgorithm(Eigen::Vector3f{1.0F, 0.0F, 0.0F},
                                                       Eigen::Vector3f{0.0F, 1.0F, 0.0F},
                                                       1e-3F,
-                                                      TrackingMode::SPECIFIED_ANGLE,
-                                                      2.0F,
-                                                      2.0F);  // 2.0 + 2.0 = 4.0, which wraps to 4.0 - 2*pi
+                                                      TrackingMode::AUTO_TRACK,
+                                                      0.0F,
+                                                      2.0F);
 
-    float result =
-        alg.update(Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero(), Eigen::Vector3f{1.0F, 0.0F, 0.0F}, 0.0F);
+    // Sun in the (a2, a3) plane at 2.0 rad from a2: 2.0 + 2.0 = 4.0, which wraps to 4.0 - 2*pi.
+    const Eigen::Vector3f sun{0.0F, cosf(2.0F), sinf(2.0F)};
+    float result = alg.update(Eigen::Vector3f::Zero(), Eigen::Vector3f::Zero(), sun, 0.0F);
     constexpr float pi = std::numbers::pi_v<float>;
     EXPECT_NEAR(result, 4.0F - 2.0F * pi, 1e-5F);
 }

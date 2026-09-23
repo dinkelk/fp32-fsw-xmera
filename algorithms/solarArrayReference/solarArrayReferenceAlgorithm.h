@@ -121,7 +121,7 @@ class SolarArrayReferenceConfig final {
     float alignmentThreshold;   //!< [rad] alignment threshold angle between sun direction and drive axis
     TrackingMode trackingMode;  //!< array tracking mode
     float specifiedArrayAngle;  //!< [rad] specified reference array angle when tracking mode is specified angle
-    float offsetAngle;          //!< [rad] offset angle added to the determined reference angle
+    float offsetAngle;          //!< [rad] offset angle added to the Sun-tracking reference angle
 };
 
 /*! @brief Pure algorithm for computing solar array rotation reference angles.

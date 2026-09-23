@@ -56,7 +56,7 @@ float SolarArrayReferenceAlgorithm::update(
             break;
         }
         case TrackingMode::SPECIFIED_ANGLE: {
-            thetaRef = this->cfg.getSpecifiedArrayAngle() + this->cfg.getOffsetAngle();
+            thetaRef = this->cfg.getSpecifiedArrayAngle();
             break;
         }
     }

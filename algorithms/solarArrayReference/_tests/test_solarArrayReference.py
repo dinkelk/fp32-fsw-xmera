@@ -150,15 +150,15 @@ def test_solarArrayReference(show_plots, rHat_SB_N, sigma_BN, sigma_RN, accuracy
     (-1.2, 0.0),
     (3.0, 0.0),
     (-3.0, 0.0),
-    (0.5, 0.3),     # offset shifts result
-    (2.0, 2.0),     # sum past pi -> wraps to negative
-    (-2.0, -2.0),   # sum past -pi -> wraps to positive
+    (0.5, 0.3),     # offset is ignored
+    (2.0, 2.0),     # offset is ignored
+    (-2.0, -2.0),   # offset is ignored
 ])
 @pytest.mark.parametrize("accuracy", [1e-6])
 def test_solarArrayReference_specifiedAngle(show_plots, specifiedAngle, offsetAngle, accuracy):
     r"""
-    Verifies that in SPECIFIED_ANGLE tracking mode the output reference angle equals
-    (specifiedAngle + offsetAngle) wrapped to [-pi, pi], regardless of attitude or sun inputs.
+    Verifies that in SPECIFIED_ANGLE tracking mode the output reference angle equals specifiedAngle
+    wrapped to [-pi, pi], regardless of attitude, sun inputs, or the configured offset angle.
     """
     a1Hat_B = np.array([1, 0, 0])
     a2Hat_B = np.array([0, 1, 0])
@@ -207,8 +207,7 @@ def test_solarArrayReference_specifiedAngle(show_plots, specifiedAngle, offsetAn
     unit_test_sim.ConfigureStopTime(macros.sec2nano(0.5))
     unit_test_sim.ExecuteSimulation()
 
-    summed = specifiedAngle + offsetAngle
-    expected = np.arctan2(np.sin(summed), np.cos(summed))
+    expected = np.arctan2(np.sin(specifiedAngle), np.cos(specifiedAngle))
     np.testing.assert_allclose(data_log.theta[0], expected, atol=accuracy, rtol=accuracy)
 
 

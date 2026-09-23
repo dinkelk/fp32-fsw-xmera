@@ -24,7 +24,7 @@ typedef struct SolarArrayReferenceAlgorithmHandle SolarArrayReferenceAlgorithmHa
  * @param alignmentThreshold  [rad] alignment threshold between sun direction and drive axis; in [1e-3, pi/2].
  * @param trackingMode        [-] array tracking mode; must be a valid enumerator.
  * @param specifiedArrayAngle [rad] reference array angle used in SPECIFIED_ANGLE mode; in [-pi, pi].
- * @param offsetAngle         [rad] offset added to the determined reference angle; in [-pi, pi].
+ * @param offsetAngle         [rad] offset added to the Sun-tracking reference angle; in [-pi, pi].
  * @return true when the configuration is valid. Never throws, so it can guard the throwing
  *         create/setConfig from an invalid configuration.
  */
@@ -44,7 +44,7 @@ bool SolarArrayReferenceAlgorithm_validateConfig(const Vector3f_c* driveAxis,
  * @param alignmentThreshold  [rad] alignment threshold between sun direction and drive axis; in [1e-3, pi/2].
  * @param trackingMode        [-] array tracking mode; must be a valid enumerator.
  * @param specifiedArrayAngle [rad] reference array angle used in SPECIFIED_ANGLE mode; in [-pi, pi].
- * @param offsetAngle         [rad] offset added to the determined reference angle; in [-pi, pi].
+ * @param offsetAngle         [rad] offset added to the Sun-tracking reference angle; in [-pi, pi].
  * @return Pointer to a new SolarArrayReferenceAlgorithm (must be destroyed).
  * Validate the configuration with validateConfig first; invalid input throws.
  */
@@ -71,7 +71,7 @@ void SolarArrayReferenceAlgorithm_destroy(SolarArrayReferenceAlgorithmHandle* se
  * @param alignmentThreshold  [rad] alignment threshold between sun direction and drive axis; in [1e-3, pi/2].
  * @param trackingMode        [-] array tracking mode; must be a valid enumerator.
  * @param specifiedArrayAngle [rad] reference array angle used in SPECIFIED_ANGLE mode; in [-pi, pi].
- * @param offsetAngle         [rad] offset added to the determined reference angle; in [-pi, pi].
+ * @param offsetAngle         [rad] offset added to the Sun-tracking reference angle; in [-pi, pi].
  * Validate the configuration with validateConfig first; invalid input throws.
  */
 void SolarArrayReferenceAlgorithm_setConfig(SolarArrayReferenceAlgorithmHandle* self,
